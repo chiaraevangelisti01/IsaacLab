@@ -40,6 +40,7 @@ def main():
     # Initialize the simulation context
     sim_cfg = SimulationCfg(dt=0.01)
     sim = SimulationContext(sim_cfg)
+    sim.get_physics_context().enable_direct_gpu_api = False
     # Set main camera
     sim.set_camera_view([2.5, 2.5, 2.5], [0.0, 0.0, 0.0])
 
