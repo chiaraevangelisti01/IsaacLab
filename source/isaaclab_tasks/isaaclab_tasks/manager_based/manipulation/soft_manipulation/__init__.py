@@ -2,9 +2,3 @@
 # All rights reserved.
 #
 # SPDX-License-Identifier: BSD-3-Clause
-
-
-"""This sub-module contains the functions that are specific to the locomanipulation environments."""
-
-from .tracking import *  # noqa
-from ..manipulation.soft_manipulation import *  # noqa

@@ -29,4 +29,5 @@ from .sawyer import *
 from .shadow_hand import *
 from .spot import *
 from .unitree import *
+from .unitree_h1_aist import *
 from .universal_robots import *
