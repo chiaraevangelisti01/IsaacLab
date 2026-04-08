@@ -33,7 +33,10 @@ H1_CFG = ArticulationCfg(
             max_depenetration_velocity=1.0,
         ),
         articulation_props=sim_utils.ArticulationRootPropertiesCfg(
-            enabled_self_collisions=True, solver_position_iteration_count=4, solver_velocity_iteration_count=4
+            enabled_self_collisions=False, 
+            solver_position_iteration_count=4, 
+            solver_velocity_iteration_count=4,
+            fix_root_link= True,
         ),
     ),
     init_state=ArticulationCfg.InitialStateCfg(
@@ -109,6 +112,9 @@ H1_MINIMAL_CFG.spawn.usd_path = f"{ISAACLAB_NUCLEUS_DIR}/Robots/Unitree/H1/h1_mi
 
 This configuration removes most collision meshes to speed up simulation.
 """
+
+H1_FIXED_CFG = H1_CFG.copy()
+H1_FIXED_CFG.spawn.articulation_props.fix_root_link = True
 
 
 

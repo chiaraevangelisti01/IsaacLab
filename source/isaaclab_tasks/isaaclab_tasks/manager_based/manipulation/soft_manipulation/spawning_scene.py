@@ -11,6 +11,7 @@ app_launcher = AppLauncher(args_cli)
 simulation_app = app_launcher.app
 
 # Isaac imports
+from isaaclab.envs.mdp.observations import joint_vel
 import isaaclab.sim as sim_utils
 from isaaclab.scene import InteractiveScene, InteractiveSceneCfg
 from isaaclab.sim import SimulationContext
@@ -19,9 +20,10 @@ from isaaclab.sim.spawners.from_files.from_files_cfg import GroundPlaneCfg, UsdF
 from isaaclab.utils import configclass
 from isaaclab.utils import configclass
 
-from isaaclab_assets.robots.unitree_h1_aist import H1_CFG
+from isaaclab_assets.robots.unitree_h1_aist import H1_CFG, H1_FIXED_CFG
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 
+import torch
 
 
 # ---------------------------
@@ -65,7 +67,7 @@ class SpawningSceneCfg(InteractiveSceneCfg):
     )
     
     # Robot 
-    robot: ArticulationCfg = H1_CFG.replace(
+    robot: ArticulationCfg = H1_FIXED_CFG.replace(
         prim_path="{ENV_REGEX_NS}/Robot",
         init_state=ArticulationCfg.InitialStateCfg(
             pos=(-0.6, 0.0, 1.0),   
@@ -100,8 +102,13 @@ def run(sim, scene):
             robot.write_root_pose_to_sim(root_state[:, :7])
             robot.write_root_velocity_to_sim(root_state[:, 7:])
 
-            joint_pos = robot.data.default_joint_pos.clone()
-            joint_vel = robot.data.default_joint_vel.clone()
+            # joint_pos = robot.data.default_joint_pos.clone()
+            # joint_vel = robot.data.default_joint_vel.clone()
+            print(robot.data.joint_names)
+            print(robot.data.default_joint_pos.shape)
+            #set randoma joint positions within limits
+            joint_pos = torch.rand_like(robot.data.default_joint_pos) * 0.35 - 0.05
+            joint_vel = torch.rand_like(robot.data.default_joint_vel) * 0.35 - 0.05
             robot.write_joint_state_to_sim(joint_pos, joint_vel)
 
             nodal_state = cube.data.default_nodal_state_w.clone()
