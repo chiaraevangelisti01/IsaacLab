@@ -41,7 +41,222 @@ import torch
 import isaaclab.sim as sim_utils
 import isaaclab.utils.math as math_utils
 from isaaclab.assets import DeformableObject, DeformableObjectCfg
+import omni.usd
 
+from pxr import PhysxSchema, UsdPhysics, UsdGeom, Usd 
+
+def get_visual_mesh_world_bounds(stage, env_id: int):
+    """Return world-space bounds of the rendered deformable surface mesh."""
+
+    mesh_path = f"/World/env_{env_id}/Cube/geometry/mesh"
+    mesh_prim = stage.GetPrimAtPath(mesh_path)
+
+    if not mesh_prim.IsValid():
+        raise RuntimeError(f"Visual mesh not found: {mesh_path}")
+
+    mesh = UsdGeom.Mesh(mesh_prim)
+    points = mesh.GetPointsAttr().Get()
+
+    if points is None or len(points) == 0:
+        raise RuntimeError(f"No visual points found on: {mesh_path}")
+
+    xform_cache = UsdGeom.XformCache(Usd.TimeCode.Default())
+    local_to_world = xform_cache.GetLocalToWorldTransform(mesh_prim)
+
+    points_w = [
+        local_to_world.Transform(point)
+        for point in points
+    ]
+
+    min_x = min(point[0] for point in points_w)
+    min_y = min(point[1] for point in points_w)
+    min_z = min(point[2] for point in points_w)
+
+    max_x = max(point[0] for point in points_w)
+    max_y = max(point[1] for point in points_w)
+    max_z = max(point[2] for point in points_w)
+
+    return (
+        (min_x, min_y, min_z),
+        (max_x, max_y, max_z),
+    )
+
+def set_deformable_tetmesh_collision_offsets(
+    rest_offset: float = 0.0,
+    contact_offset: float = 0.001,
+):
+    """Author collision offsets on the actual collision-bearing TetMesh."""
+
+    if contact_offset <= rest_offset:
+        raise ValueError(
+            f"contact_offset ({contact_offset}) must be greater than "
+            f"rest_offset ({rest_offset})."
+        )
+
+    stage = omni.usd.get_context().get_stage()
+
+    for env_id in range(4):
+        tetmesh_path = f"/World/env_{env_id}/Cube/sim_mesh"
+        tetmesh_prim = stage.GetPrimAtPath(tetmesh_path)
+
+        if not tetmesh_prim.IsValid():
+            raise RuntimeError(
+                f"Expected generated TetMesh was not found: {tetmesh_path}"
+            )
+
+        if tetmesh_prim.GetTypeName() != "TetMesh":
+            raise RuntimeError(
+                f"Expected TetMesh at {tetmesh_path}, "
+                f"found {tetmesh_prim.GetTypeName()!r}"
+            )
+
+        # Apply PhysX collision settings to the prim that actually carries
+        # PhysicsCollisionAPI.
+        collision_api = PhysxSchema.PhysxCollisionAPI.Apply(tetmesh_prim)
+
+        if not collision_api:
+            raise RuntimeError(
+                f"Could not apply PhysxCollisionAPI to {tetmesh_path}"
+            )
+
+        collision_api.CreateRestOffsetAttr().Set(rest_offset)
+        collision_api.CreateContactOffsetAttr().Set(contact_offset)
+
+        actual_rest_offset = collision_api.GetRestOffsetAttr().Get()
+        actual_contact_offset = collision_api.GetContactOffsetAttr().Get()
+
+        print(f"\n[TETMESH COLLISION SETTINGS] {tetmesh_path}")
+        print(f"  schemas: {list(tetmesh_prim.GetAppliedSchemas())}")
+        print(f"  rest offset: {actual_rest_offset}")
+        print(f"  contact offset: {actual_contact_offset}")
+
+def _value_to_string(value):
+    """Make large USD values readable without dumping entire mesh arrays."""
+    if value is None:
+        return "None"
+
+    try:
+        length = len(value)
+    except TypeError:
+        return repr(value)
+
+    if length > 16:
+        return f"<{type(value).__name__}, length={length}>"
+
+    return repr(value)
+
+
+def dump_deformable_usd(stage, label):
+    """Read-only dump of all prims below every procedural Cube."""
+
+    print("\n" + "=" * 100)
+    print(f"[USD DEFORMABLE DUMP] {label}")
+    print("=" * 100)
+
+    for prim in stage.Traverse():
+        path = str(prim.GetPath())
+
+        if not any(path.startswith(f"/World/env_{i}/Cube") for i in range(4)):
+            continue
+
+        print(f"\nPRIM: {path}")
+        print(f"  type name: {prim.GetTypeName()!r}")
+        print(f"  active: {prim.IsActive()}")
+        print(f"  valid: {prim.IsValid()}")
+        print(f"  instance: {prim.IsInstance()}")
+        print(f"  instance proxy: {prim.IsInstanceProxy()}")
+        print(f"  prototype: {prim.IsPrototype()}")
+        print(f"  applied schemas: {list(prim.GetAppliedSchemas())}")
+
+        # Print every relationship because simulation/collision meshes may be
+        # connected to the deformable body through relationships.
+        relationships = prim.GetRelationships()
+
+        if relationships:
+            print("  relationships:")
+
+            for relationship in relationships:
+                targets = relationship.GetTargets()
+                print(
+                    f"    {relationship.GetName()}: "
+                    f"{[str(target) for target in targets]}"
+                )
+
+        # Inspect PhysxCollisionAPI specifically.
+        has_physx_collision_api = prim.HasAPI(
+            PhysxSchema.PhysxCollisionAPI
+        )
+
+        has_usd_collision_api = prim.HasAPI(
+            UsdPhysics.CollisionAPI
+        )
+
+        print(f"  has UsdPhysics.CollisionAPI: {has_usd_collision_api}")
+        print(f"  has PhysxCollisionAPI: {has_physx_collision_api}")
+
+        if has_physx_collision_api:
+            collision_api = PhysxSchema.PhysxCollisionAPI(prim)
+
+            rest_attr = collision_api.GetRestOffsetAttr()
+            contact_attr = collision_api.GetContactOffsetAttr()
+
+            print("  PhysxCollisionAPI values:")
+
+            for name, attr in (
+                ("restOffset", rest_attr),
+                ("contactOffset", contact_attr),
+            ):
+                if attr:
+                    print(
+                        f"    {name}:"
+                        f" value={attr.Get()},"
+                        f" authored={attr.HasAuthoredValueOpinion()},"
+                        f" type={attr.GetTypeName()}"
+                    )
+                else:
+                    print(f"    {name}: <attribute unavailable>")
+
+        # Print attributes related to deformable topology, collision, cooking
+        # and offsets without dumping the point/tet arrays themselves.
+        interesting_tokens = (
+            "collision",
+            "contact",
+            "restoffset",
+            "simulationmesh",
+            "collisionmesh",
+            "tet",
+            "deformable",
+            "cooking",
+        )
+
+        interesting_attributes = []
+
+        for attr in prim.GetAttributes():
+            attr_name = attr.GetName()
+            attr_name_lower = attr_name.lower()
+
+            if any(token in attr_name_lower for token in interesting_tokens):
+                interesting_attributes.append(attr)
+
+        if interesting_attributes:
+            print("  relevant attributes:")
+
+            for attr in interesting_attributes:
+                try:
+                    value = attr.Get()
+                except Exception as exc:
+                    value = f"<Get() failed: {exc}>"
+
+                print(
+                    f"    {attr.GetName()}:"
+                    f" value={_value_to_string(value)},"
+                    f" authored={attr.HasAuthoredValueOpinion()},"
+                    f" type={attr.GetTypeName()}"
+                )
+
+    print("\n" + "=" * 100)
+    print(f"[END USD DEFORMABLE DUMP] {label}")
+    print("=" * 100 + "\n")
 
 def design_scene():
     """Designs the scene."""
@@ -167,6 +382,28 @@ def run_simulator(sim: sim_utils.SimulationContext, entities: dict, origins: tor
         # update buffers
         cube_object.update(sim_dt)
 
+        if count % int(1.0 / sim_dt) == 0:
+            stage = omni.usd.get_context().get_stage()
+
+            nodal_pos_w = cube_object.data.nodal_pos_w.torch
+            nodal_min_w = torch.min(nodal_pos_w, dim=1).values
+            nodal_max_w = torch.max(nodal_pos_w, dim=1).values
+
+            print("\n[DEFORMABLE FLOOR GAP DIAGNOSTIC]")
+
+            for env_id in range(cube_object.num_instances):
+                visual_min_w, visual_max_w = (
+                    get_visual_mesh_world_bounds(stage, env_id)
+                )
+
+                print(
+                    f"  env_{env_id}: "
+                    f"sim_min_z={nodal_min_w[env_id, 2].item():.6f}, "
+                    f"sim_max_z={nodal_max_w[env_id, 2].item():.6f}, "
+                    f"visual_min_z={visual_min_w[2]:.6f}, "
+                    f"visual_max_z={visual_max_w[2]:.6f}"
+                )
+
         # print the root positions every second
         if count % int(1.0 / sim_dt) == 0:
             print(f"Time {sim_time:.2f}s: \tRoot position (in world): {cube_object.data.root_pos_w.torch[:, :3]}")
@@ -189,13 +426,29 @@ def main():
     sim = sim_utils.SimulationContext(sim_cfg)
     # Set main camera
     sim.set_camera_view(eye=[2.0, 2.0, 2.0], target=[0.0, 0.0, 0.75])
-    # Design scene
+    
+        # Design scene
     scene_entities, scene_origins = design_scene()
     scene_origins = torch.tensor(scene_origins, device=sim.device)
-    # Play the simulator
+
+    # MeshCuboidCfg has already generated /Cube/sim_mesh at this point.
+    # Author the offsets on the actual collision-bearing TetMesh before
+    # PhysX starts and before Isaac Lab creates its tensor views.
+    set_deformable_tetmesh_collision_offsets(
+        rest_offset=0.0,
+        contact_offset=0.001,
+    )
+
+    # Optional read-only verification
+    stage = omni.usd.get_context().get_stage()
+    dump_deformable_usd(
+        stage,
+        "AFTER TETMESH OFFSET PATCH, BEFORE sim.reset()",
+    )
+
+    # Initialize PhysX and tensor views only after the final USD structure
+    # and properties are complete.
     sim.reset()
-    # Now we are ready!
-    print("[INFO]: Setup complete...")
     # Run the simulator
     camera_output = os.path.join(os.path.dirname(os.path.realpath(__file__)), "output", "camera")
     run_simulator(sim, scene_entities, scene_origins, camera_output)
