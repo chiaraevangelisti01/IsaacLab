@@ -17,14 +17,14 @@ def parse_args():
     parser.add_argument(
         "--input_usd",
         type=str,
-        default=  "/home/chiara/git/holosoma/src/holosoma_retargeting/holosoma_retargeting/models/dice/dice_supercube_rigid2.usd",
+        default=  "/home/chiara/git/IsaacLab_v3_test/scripts/soft_dice_environment/models/dice_superquadric_clean_simplified.usd",
         help="Path to the original mesh USD, e.g. dice_supercube.usd.",
     )
 
     parser.add_argument(
         "--output_usd",
         type=str,
-        default="/home/chiara/git/holosoma/src/holosoma_retargeting/holosoma_retargeting/models/dice/dice_supercube_rigid2.usd",
+        default="//home/chiara/git/IsaacLab_v3_test/scripts/soft_dice_environment/models/dice_superquadric_rigid.usd",
         help="Path to save the rigid-ready USD, e.g. dice_supercube_rigid.usd.",
     )
 

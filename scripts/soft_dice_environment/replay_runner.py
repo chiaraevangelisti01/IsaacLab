@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import torch
 
-from replay_diagnostics import ReplayDiagnostics
+from scripts.soft_dice_environment.replay_debug_diagnostics import ReplayDiagnostics
 from replay_utils import (
     CUSTOM_DICE_SCALE,
     FAKE_EE_OFFSET_IN_ELBOW,

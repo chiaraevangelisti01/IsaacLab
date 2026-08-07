@@ -20,13 +20,13 @@ HOLOSOMA_H1_JOINT_NAMES = [
 ]
 HOLOSOMA_TO_ISAAC_INDICES = [0, 5, 10, 1, 6, 11, 15, 2, 7, 12, 16, 3, 8, 13, 17, 4, 9, 14, 18]
 FAKE_EE_OFFSET_IN_ELBOW = [0.28, 0.0, -0.0185]
-REFERENCE_ROBOT_WORLD_OFFSET = np.array([0.0, 3.0, 0.0], dtype=np.float32)
+REFERENCE_ROBOT_WORLD_OFFSET = np.array([0.0, 1.5, 0.0], dtype=np.float32)
 CUSTOM_DICE_SCALE = (1.0, 1.0, 1.0)
 
 # This file is expected at: <repo>/scripts/soft_dice_environment/replay_utils.py
 MODELS_PATH = Path(__file__).resolve().parent/"models"
 CUSTOM_DICE_DEFORMABLE_USD = str(MODELS_PATH / "dice_superquadric_deformable_two_meshes.usd")
-CUSTOM_DICE_RIGID_REFERENCE_USD = str(MODELS_PATH / "dice_superquadric.usd")
+CUSTOM_DICE_RIGID_REFERENCE_USD = str(MODELS_PATH / "dice_superquadric_rigid.usd")
 
 
 def validate_asset_paths():
@@ -395,6 +395,84 @@ def force_enable_dome_light():
     print("[Lights] Forced DomeLight enabled.")
 
 
+# def desired_cube_pose_from_holosoma(
+#     root_qpos_np,
+#     object_qpos_np,
+#     frame: int,
+#     isaac_robot_pos_np,
+#     isaac_robot_quat_xyzw_np,
+#     reference_offset=None,
+#     apply_z_lift=True,
+# ):
+#     """Return desired cube pose in Isaac coordinates.
+
+#     This version preserves the cube pose relative to the robot root frame.
+
+#     Holosoma/MuJoCo:
+#         root_qpos quaternion: WXYZ
+#         object_qpos quaternion: WXYZ
+
+#     IsaacLab 3.x:
+#         API/data quaternion: XYZW
+#     """
+#     frame = min(frame, root_qpos_np.shape[0] - 1, object_qpos_np.shape[0] - 1)
+
+#     retarget_root_pos = np.asarray(root_qpos_np[frame, 0:3], dtype=np.float32)
+#     retarget_root_quat_wxyz = np.asarray(root_qpos_np[frame, 3:7], dtype=np.float32)
+
+#     retarget_dice_pos = np.asarray(object_qpos_np[frame, 0:3], dtype=np.float32)
+
+#     source_dice_quat_wxyz = np.asarray(object_qpos_np[frame, 3:7], dtype=np.float32)
+#     source_dice_quat_wxyz = quat_norm_wxyz(source_dice_quat_wxyz).astype(np.float32)
+
+#     R_holo_dice = quat_wxyz_to_rotmat_np(source_dice_quat_wxyz)
+
+#     # Holosoma root orientation.
+#     R_holo_root = quat_wxyz_to_rotmat_np(retarget_root_quat_wxyz)
+
+#     # Fixed Isaac root orientation.
+#     R_isaac_root = quat_xyzw_to_rotmat_np(isaac_robot_quat_xyzw_np)
+
+#     R_root_dice = R_holo_root.T @ R_holo_dice
+#     R_isaac_dice = R_isaac_root @ R_root_dice
+
+#     corrected_dice_quat_xyzw = rotmat_to_quat_xyzw_np(R_isaac_dice)
+
+#     # Old version used this world vector directly.
+#     dice_rel_world_holo = retarget_dice_pos - retarget_root_pos
+
+#     # New version expresses the object in the Holosoma robot root frame.
+#     dice_rel_root_local = R_holo_root.T @ dice_rel_world_holo
+
+#     # Then places that same root-local vector around the fixed Isaac root.
+#     pos = np.asarray(isaac_robot_pos_np, dtype=np.float32) + (
+#         R_isaac_root @ dice_rel_root_local
+#     ).astype(np.float32)
+
+#     # For exact reference matching, keep this False.
+#     # If True, the cube will intentionally be lifted by +1 cm.
+#     if apply_z_lift:
+#         pos[2] += 0.01
+
+#     if reference_offset is not None:
+#         pos = pos + np.asarray(reference_offset, dtype=np.float32)
+#     if frame in [0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330, 360, 390, 420, 450, 480, 510]:
+#         print(
+#             "[DesiredCubePoseDebug] "
+#             f"frame={frame} | "
+#             f"root_pos={retarget_root_pos} | "
+#             f"dice_world={retarget_dice_pos} | "
+#             f"dice_minus_root_world={dice_rel_world_holo} | "
+#             f"dice_rel_root_local={dice_rel_root_local} | "
+#             f"isaac_pos={pos}"
+#         )
+#     return (
+#         pos,
+#         corrected_dice_quat_xyzw,
+#         dice_rel_root_local.astype(np.float32),
+#         retarget_root_pos,
+#         retarget_dice_pos,
+#     )
 def desired_cube_pose_from_holosoma(
     root_qpos_np,
     object_qpos_np,
@@ -406,45 +484,56 @@ def desired_cube_pose_from_holosoma(
 ):
     """Return desired cube pose in Isaac coordinates.
 
-    This version preserves the cube pose relative to the robot root frame.
+    Object pose is replayed as Holosoma world delta from frame 0,
+    mapped into Isaac coordinates using the frame-0 root alignment.
 
-    Holosoma/MuJoCo:
-        root_qpos quaternion: WXYZ
-        object_qpos quaternion: WXYZ
-
-    IsaacLab 3.x:
-        API/data quaternion: XYZW
+    This prevents robot-root bending from artificially moving the dice.
     """
     frame = min(frame, root_qpos_np.shape[0] - 1, object_qpos_np.shape[0] - 1)
 
     retarget_root_pos = np.asarray(root_qpos_np[frame, 0:3], dtype=np.float32)
     retarget_root_quat_wxyz = np.asarray(root_qpos_np[frame, 3:7], dtype=np.float32)
+    retarget_root_quat_wxyz = quat_norm_wxyz(retarget_root_quat_wxyz).astype(np.float32)
 
     retarget_dice_pos = np.asarray(object_qpos_np[frame, 0:3], dtype=np.float32)
 
     source_dice_quat_wxyz = np.asarray(object_qpos_np[frame, 3:7], dtype=np.float32)
     source_dice_quat_wxyz = quat_norm_wxyz(source_dice_quat_wxyz).astype(np.float32)
-    corrected_dice_quat_xyzw = quat_wxyz_to_xyzw(source_dice_quat_wxyz)
 
-    # Holosoma root orientation.
-    R_holo_root = quat_wxyz_to_rotmat_np(retarget_root_quat_wxyz)
+    retarget_root_pos_0 = np.asarray(root_qpos_np[0, 0:3], dtype=np.float32)
 
-    # Fixed Isaac root orientation.
+    retarget_root_quat_wxyz_0 = np.asarray(root_qpos_np[0, 3:7], dtype=np.float32)
+    retarget_root_quat_wxyz_0 = quat_norm_wxyz(retarget_root_quat_wxyz_0).astype(np.float32)
+
+    retarget_dice_pos_0 = np.asarray(object_qpos_np[0, 0:3], dtype=np.float32)
+
+    R_holo_root_0 = quat_wxyz_to_rotmat_np(retarget_root_quat_wxyz_0)
     R_isaac_root = quat_xyzw_to_rotmat_np(isaac_robot_quat_xyzw_np)
 
-    # Old version used this world vector directly.
-    dice_rel_world_holo = retarget_dice_pos - retarget_root_pos
+    R_align = R_isaac_root @ R_holo_root_0.T
 
-    # New version expresses the object in the Holosoma robot root frame.
-    dice_rel_root_local = R_holo_root.T @ dice_rel_world_holo
+    dice_rel_world_holo_0 = retarget_dice_pos_0 - retarget_root_pos_0
 
-    # Then places that same root-local vector around the fixed Isaac root.
-    pos = np.asarray(isaac_robot_pos_np, dtype=np.float32) + (
-        R_isaac_root @ dice_rel_root_local
+    initial_cube_pos = np.asarray(isaac_robot_pos_np, dtype=np.float32) + (
+        R_align @ dice_rel_world_holo_0
     ).astype(np.float32)
 
-    # For exact reference matching, keep this False.
-    # If True, the cube will intentionally be lifted by +1 cm.
+    dice_world_delta = retarget_dice_pos - retarget_dice_pos_0
+
+    pos = initial_cube_pos + (
+        R_align @ dice_world_delta
+    ).astype(np.float32)
+
+    R_holo_dice = quat_wxyz_to_rotmat_np(source_dice_quat_wxyz)
+
+    R_isaac_dice = R_align @ R_holo_dice
+
+    corrected_dice_quat_xyzw = rotmat_to_quat_xyzw_np(R_isaac_dice)
+
+    dice_rel_world_holo = retarget_dice_pos - retarget_root_pos
+    R_holo_root = quat_wxyz_to_rotmat_np(retarget_root_quat_wxyz)
+    dice_rel_root_local = R_holo_root.T @ dice_rel_world_holo
+
     if apply_z_lift:
         pos[2] += 0.01
 
@@ -546,3 +635,40 @@ def initial_robot_reset(scene: InteractiveScene):
     scene.reset()
     print("[INFO] Reset robot and reference_robot using InteractiveScene pattern.")
 
+def rotmat_to_quat_xyzw_np(R):
+    """Convert a 3x3 rotation matrix to an IsaacLab XYZW quaternion."""
+    R = np.asarray(R, dtype=np.float64)
+
+    trace = np.trace(R)
+
+    if trace > 0.0:
+        s = np.sqrt(trace + 1.0) * 2.0
+        w = 0.25 * s
+        x = (R[2, 1] - R[1, 2]) / s
+        y = (R[0, 2] - R[2, 0]) / s
+        z = (R[1, 0] - R[0, 1]) / s
+
+    elif R[0, 0] > R[1, 1] and R[0, 0] > R[2, 2]:
+        s = np.sqrt(1.0 + R[0, 0] - R[1, 1] - R[2, 2]) * 2.0
+        w = (R[2, 1] - R[1, 2]) / s
+        x = 0.25 * s
+        y = (R[0, 1] + R[1, 0]) / s
+        z = (R[0, 2] + R[2, 0]) / s
+
+    elif R[1, 1] > R[2, 2]:
+        s = np.sqrt(1.0 + R[1, 1] - R[0, 0] - R[2, 2]) * 2.0
+        w = (R[0, 2] - R[2, 0]) / s
+        x = (R[0, 1] + R[1, 0]) / s
+        y = 0.25 * s
+        z = (R[1, 2] + R[2, 1]) / s
+
+    else:
+        s = np.sqrt(1.0 + R[2, 2] - R[0, 0] - R[1, 1]) * 2.0
+        w = (R[1, 0] - R[0, 1]) / s
+        x = (R[0, 2] + R[2, 0]) / s
+        y = (R[1, 2] + R[2, 1]) / s
+        z = 0.25 * s
+
+    q_xyzw = np.array([x, y, z, w], dtype=np.float32)
+    q_xyzw /= np.linalg.norm(q_xyzw)
+    return q_xyzw

@@ -12,7 +12,7 @@ from isaaclab.app import AppLauncher
 parser = argparse.ArgumentParser()
 parser.add_argument("--num_envs", type=int, default=1)
 parser.add_argument("--steps", type=int, default=6000)
-parser.add_argument("--dt", type=float, default=1.0 / 120.0)
+parser.add_argument("--dt", type=float, default=1.0 / 60.0)
 parser.add_argument("--motion_file", type=str, required=True)
 parser.add_argument("--motion_start_frame", type=int, default=0)
 parser.add_argument("--motion_loop", action="store_true")
@@ -62,7 +62,7 @@ from isaaclab_physx.sim import PhysxDeformableBodyMaterialCfg
 from isaaclab_physx.sim.schemas import PhysxCollisionPropertiesCfg, PhysxRigidBodyPropertiesCfg
 from isaaclab_physx.sim.spawners.materials import PhysxRigidBodyMaterialCfg
 
-from replay_diagnostics import ReplayDiagnostics
+from scripts.soft_dice_environment.replay_debug_diagnostics import ReplayDiagnostics
 from replay_runner import replay_motion
 from replay_utils import (
     CUSTOM_DICE_DEFORMABLE_USD,
@@ -149,8 +149,8 @@ def make_deformable_cube_cfg(prim_path: str):
             scale=CUSTOM_DICE_SCALE,
             physics_material=PhysxDeformableBodyMaterialCfg(
                 density=21.5,
-                poissons_ratio=0.35,
-                youngs_modulus=1e4,
+                poissons_ratio=0.37,
+                youngs_modulus=1.5e4,
                 static_friction=1.2,
                 dynamic_friction=0.8,
                 elasticity_damping=0.02,
@@ -188,15 +188,15 @@ class ReplaySceneCfg(InteractiveSceneCfg):
         spawn=sim_utils.CuboidCfg(
             size=(args_cli.table_length, args_cli.table_width, 0.80),
             collision_props=sim_utils.CollisionPropertiesCfg(
-                contact_offset=0.005,
-                rest_offset=0.001,
+                contact_offset=0.008,
+                rest_offset=0.002,
             ),
             visual_material=sim_utils.PreviewSurfaceCfg(
                 diffuse_color=(0.35, 0.35, 0.35),
             ),
             physics_material=sim_utils.RigidBodyMaterialCfg(
-                static_friction=1.2,
-                dynamic_friction=0.8,
+                static_friction=0.1,
+                dynamic_friction=0.03,
                 restitution=0.0,
                 friction_combine_mode="average",
                 restitution_combine_mode="average",
@@ -219,7 +219,7 @@ class ReplaySceneCfg(InteractiveSceneCfg):
         prim_path="{ENV_REGEX_NS}/Robot",
         init_state=ArticulationCfg.InitialStateCfg(
             rot=(0.0, 0.0, 1.0, 0.0),
-            pos=(0.0, 0.0, 1.02),
+            pos=(0.0, 0.0, 1.06),
         ),
     )
 
@@ -230,7 +230,7 @@ class ReplaySceneCfg(InteractiveSceneCfg):
             pos=(
                 float(REFERENCE_ROBOT_WORLD_OFFSET[0]),
                 float(REFERENCE_ROBOT_WORLD_OFFSET[1]),
-                1.02 + float(REFERENCE_ROBOT_WORLD_OFFSET[2]),
+                1.06 + float(REFERENCE_ROBOT_WORLD_OFFSET[2]),
             ),
         ),
     )
