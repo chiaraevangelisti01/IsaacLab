@@ -1,0 +1,204 @@
+from __future__ import annotations
+
+import pickle
+from pathlib import Path
+
+import numpy as np
+
+from isaaclab_tasks import ISAACLAB_TASKS_EXT_DIR
+
+
+HOLOSOMA_H1_JOINT_NAMES = [
+    "left_hip_yaw_joint",
+    "left_hip_roll_joint",
+    "left_hip_pitch_joint",
+    "left_knee_joint",
+    "left_ankle_joint",
+    "right_hip_yaw_joint",
+    "right_hip_roll_joint",
+    "right_hip_pitch_joint",
+    "right_knee_joint",
+    "right_ankle_joint",
+    "torso_joint",
+    "left_shoulder_pitch_joint",
+    "left_shoulder_roll_joint",
+    "left_shoulder_yaw_joint",
+    "left_elbow_joint",
+    "right_shoulder_pitch_joint",
+    "right_shoulder_roll_joint",
+    "right_shoulder_yaw_joint",
+    "right_elbow_joint",
+]
+
+HOLOSOMA_TO_ISAAC_INDICES = [0, 5, 10, 1, 6, 11, 15, 2, 7, 12, 16, 3, 8, 13, 17, 4, 9, 14, 18]
+
+_REPO_ROOT = Path(ISAACLAB_TASKS_EXT_DIR).resolve().parents[1]
+_MODELS_PATH = _REPO_ROOT / "scripts" / "soft_dice_environment" / "models"
+CUSTOM_DICE_DEFORMABLE_USD = str(_MODELS_PATH / "dice_superquadric_deformable_two_meshes.usd")
+CUSTOM_DICE_SCALE = (1.0, 1.0, 1.0)
+
+
+class NumpyCompatUnpickler(pickle.Unpickler):
+    def find_class(self, module, name):
+        if module.startswith("numpy._core"):
+            module = module.replace("numpy._core", "numpy.core")
+        return super().find_class(module, name)
+
+
+def validate_asset_paths() -> None:
+    path = Path(CUSTOM_DICE_DEFORMABLE_USD)
+    if not path.is_file():
+        raise FileNotFoundError(f"Required deformable dice asset does not exist: {path}")
+
+
+def load_motion_file(path: str):
+    """Load the Holosoma/OmniRetarget trajectory format used by the replay script."""
+    path = Path(path)
+
+    if not path.exists():
+        raise FileNotFoundError(f"Motion file does not exist: {path}")
+
+    if path.suffix == ".npz":
+        raw = np.load(path, allow_pickle=False)
+        data = {k: raw[k] for k in raw.files}
+    elif path.suffix == ".pkl":
+        with open(path, "rb") as f:
+            data = NumpyCompatUnpickler(f).load()
+    else:
+        raise ValueError(f"Unsupported motion extension: {path.suffix}")
+
+    if "qpos" not in data:
+        raise KeyError(f"Expected key 'qpos'. Found: {list(data.keys())}")
+
+    qpos = np.asarray(data["qpos"], dtype=np.float32)
+    if qpos.ndim != 2 or not np.isfinite(qpos).all():
+        raise ValueError(f"Bad qpos shape or values: {qpos.shape}")
+
+    fps = float(np.asarray(data.get("fps", 30.0)).reshape(-1)[0])
+
+    if qpos.shape[1] == 33:
+        root_qpos = qpos[:, 0:7]
+        robot_joint_qpos = qpos[:, 7:26]
+        object_qpos = qpos[:, 26:33]
+    elif qpos.shape[1] == 26:
+        root_qpos = qpos[:, 0:7]
+        robot_joint_qpos = qpos[:, 7:26]
+        object_qpos = None
+    elif qpos.shape[1] == 19:
+        root_qpos = None
+        robot_joint_qpos = qpos
+        object_qpos = None
+    else:
+        raise ValueError(f"Unexpected qpos dimension: {qpos.shape[1]}")
+
+    if robot_joint_qpos.shape[1] != 19:
+        raise ValueError(f"Expected 19 H1 joints, got {robot_joint_qpos.shape[1]}")
+
+    return robot_joint_qpos, fps, root_qpos, object_qpos
+
+
+def _quat_norm_wxyz(q):
+    q = np.asarray(q, dtype=np.float64)
+    return q / np.linalg.norm(q)
+
+
+def _quat_wxyz_to_rotmat(q_wxyz):
+    q = _quat_norm_wxyz(q_wxyz)
+    w, x, y, z = q
+    return np.array(
+        [
+            [1.0 - 2.0*y*y - 2.0*z*z, 2.0*x*y - 2.0*z*w, 2.0*x*z + 2.0*y*w],
+            [2.0*x*y + 2.0*z*w, 1.0 - 2.0*x*x - 2.0*z*z, 2.0*y*z - 2.0*x*w],
+            [2.0*x*z - 2.0*y*w, 2.0*y*z + 2.0*x*w, 1.0 - 2.0*x*x - 2.0*y*y],
+        ],
+        dtype=np.float64,
+    )
+
+
+def _quat_xyzw_to_rotmat(q_xyzw):
+    q = np.asarray(q_xyzw, dtype=np.float64)
+    q = q / np.linalg.norm(q)
+    x, y, z, w = q
+    return np.array(
+        [
+            [1.0 - 2.0*y*y - 2.0*z*z, 2.0*x*y - 2.0*z*w, 2.0*x*z + 2.0*y*w],
+            [2.0*x*y + 2.0*z*w, 1.0 - 2.0*x*x - 2.0*z*z, 2.0*y*z - 2.0*x*w],
+            [2.0*x*z - 2.0*y*w, 2.0*y*z + 2.0*x*w, 1.0 - 2.0*x*x - 2.0*y*y],
+        ],
+        dtype=np.float64,
+    )
+
+
+def _rotmat_to_quat_xyzw(R):
+    R = np.asarray(R, dtype=np.float64)
+    trace = np.trace(R)
+
+    if trace > 0.0:
+        s = np.sqrt(trace + 1.0) * 2.0
+        w = 0.25 * s
+        x = (R[2, 1] - R[1, 2]) / s
+        y = (R[0, 2] - R[2, 0]) / s
+        z = (R[1, 0] - R[0, 1]) / s
+    elif R[0, 0] > R[1, 1] and R[0, 0] > R[2, 2]:
+        s = np.sqrt(1.0 + R[0, 0] - R[1, 1] - R[2, 2]) * 2.0
+        w = (R[2, 1] - R[1, 2]) / s
+        x = 0.25 * s
+        y = (R[0, 1] + R[1, 0]) / s
+        z = (R[0, 2] + R[2, 0]) / s
+    elif R[1, 1] > R[2, 2]:
+        s = np.sqrt(1.0 + R[1, 1] - R[0, 0] - R[2, 2]) * 2.0
+        w = (R[0, 2] - R[2, 0]) / s
+        x = (R[0, 1] + R[1, 0]) / s
+        y = 0.25 * s
+        z = (R[1, 2] + R[2, 1]) / s
+    else:
+        s = np.sqrt(1.0 + R[2, 2] - R[0, 0] - R[1, 1]) * 2.0
+        w = (R[1, 0] - R[0, 1]) / s
+        x = (R[0, 2] + R[2, 0]) / s
+        y = (R[1, 2] + R[2, 1]) / s
+        z = 0.25 * s
+
+    q = np.asarray([x, y, z, w], dtype=np.float32)
+    q /= np.linalg.norm(q)
+    return q
+
+
+def desired_cube_pose_from_holosoma(
+    root_qpos_np,
+    object_qpos_np,
+    frame: int,
+    isaac_robot_pos_np,
+    isaac_robot_quat_xyzw_np,
+):
+    """Same frame-0 root-alignment conversion validated by the replay environment."""
+    frame = min(frame, root_qpos_np.shape[0] - 1, object_qpos_np.shape[0] - 1)
+
+    root_pos = np.asarray(root_qpos_np[frame, 0:3], dtype=np.float32)
+    root_quat = _quat_norm_wxyz(root_qpos_np[frame, 3:7]).astype(np.float32)
+    dice_pos = np.asarray(object_qpos_np[frame, 0:3], dtype=np.float32)
+    dice_quat = _quat_norm_wxyz(object_qpos_np[frame, 3:7]).astype(np.float32)
+
+    root_pos_0 = np.asarray(root_qpos_np[0, 0:3], dtype=np.float32)
+    root_quat_0 = _quat_norm_wxyz(root_qpos_np[0, 3:7]).astype(np.float32)
+    dice_pos_0 = np.asarray(object_qpos_np[0, 0:3], dtype=np.float32)
+
+    R_holo_root_0 = _quat_wxyz_to_rotmat(root_quat_0)
+    R_isaac_root = _quat_xyzw_to_rotmat(isaac_robot_quat_xyzw_np)
+    R_align = R_isaac_root @ R_holo_root_0.T
+
+    dice_rel_world_0 = dice_pos_0 - root_pos_0
+    initial_cube_pos = np.asarray(isaac_robot_pos_np, dtype=np.float32) + (
+        R_align @ dice_rel_world_0
+    ).astype(np.float32)
+
+    dice_world_delta = dice_pos - dice_pos_0
+    pos = initial_cube_pos + (R_align @ dice_world_delta).astype(np.float32)
+
+    R_holo_dice = _quat_wxyz_to_rotmat(dice_quat)
+    quat_xyzw = _rotmat_to_quat_xyzw(R_align @ R_holo_dice)
+
+    # Kept only for compatibility/debugging with the old helper.
+    R_holo_root = _quat_wxyz_to_rotmat(root_quat)
+    dice_rel_root_local = R_holo_root.T @ (dice_pos - root_pos)
+
+    return pos, quat_xyzw, dice_rel_root_local.astype(np.float32), root_pos, dice_pos

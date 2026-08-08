@@ -1,17 +1,16 @@
 from __future__ import annotations
 
-from dataclasses import MISSING
-
 import numpy as np
 
 import isaaclab.sim as sim_utils
-import isaaclab.envs.mdp as base_mdp
 from isaaclab.assets import ArticulationCfg, AssetBaseCfg, DeformableObjectCfg
 from isaaclab.envs import ManagerBasedRLEnvCfg
+import isaaclab.envs.mdp as base_mdp
 from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
 from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.managers import RewardTermCfg as RewTerm
+from isaaclab.managers import SceneEntityCfg
 from isaaclab.managers import TerminationTermCfg as DoneTerm
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.utils.configclass import configclass
@@ -19,14 +18,14 @@ from isaaclab_assets.robots.unitree_h1_aist import H1_FIXED_CFG
 from isaaclab_physx.physics import PhysxCfg
 from isaaclab_physx.sim import PhysxDeformableBodyMaterialCfg
 
-from scripts.soft_dice_environment.replay_utils import (
+from . import mdp
+from .mdp.motion_utils import (
     CUSTOM_DICE_DEFORMABLE_USD,
     CUSTOM_DICE_SCALE,
     desired_cube_pose_from_holosoma,
     load_motion_file,
+    validate_asset_paths,
 )
-
-from . import mdp
 
 
 DEFAULT_CUBE_SIZE = 0.31
@@ -36,7 +35,6 @@ DEFAULT_GROUND_Z = 0.0
 
 
 def make_deformable_cube_cfg(prim_path: str) -> DeformableObjectCfg:
-    """Same deformable dice configuration used by the working replay."""
     return DeformableObjectCfg(
         prim_path=prim_path,
         spawn=sim_utils.UsdFileCfg(
@@ -53,7 +51,7 @@ def make_deformable_cube_cfg(prim_path: str) -> DeformableObjectCfg:
             visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.8, 0.1, 0.1)),
         ),
         init_state=DeformableObjectCfg.InitialStateCfg(pos=(-0.15, 0.0, 1.01)),
-        debug_vis=True,
+        debug_vis=False,
     )
 
 
@@ -66,10 +64,7 @@ class SoftDiceSceneCfg(InteractiveSceneCfg):
 
     dome_light = AssetBaseCfg(
         prim_path="/World/Light",
-        spawn=sim_utils.DomeLightCfg(
-            intensity=3000.0,
-            color=(0.75, 0.75, 0.75),
-        ),
+        spawn=sim_utils.DomeLightCfg(intensity=3000.0, color=(0.75, 0.75, 0.75)),
     )
 
     table = AssetBaseCfg(
@@ -110,7 +105,7 @@ class SoftDiceSceneCfg(InteractiveSceneCfg):
 class CommandsCfg:
     motion = mdp.MotionCommandCfg(
         asset_name="robot",
-        motion_file=MISSING,
+        motion_file="",
         start_frame=0,
         playback_speed=1.0,
         loop=False,
@@ -119,7 +114,8 @@ class CommandsCfg:
 
 @configclass
 class ActionsCfg:
-    # Absolute H1 joint position targets. 
+    # Keep the same absolute position-target interface that passed the parity test.
+    # If PPO struggles, the next change should be normalized residual actions.
     joint_pos = base_mdp.JointPositionActionCfg(
         asset_name="robot",
         joint_names=[".*"],
@@ -134,9 +130,21 @@ class ActionsCfg:
 class ObservationsCfg:
     @configclass
     class PolicyCfg(ObsGroup):
+        # Current robot state.
         joint_pos = ObsTerm(func=base_mdp.joint_pos_rel)
         joint_vel = ObsTerm(func=base_mdp.joint_vel_rel)
-        reference = ObsTerm(func=base_mdp.generated_commands, params={"command_name": "motion"})
+
+        # Current reference cue.
+        reference_joint_pos = ObsTerm(
+            func=mdp.reference_joint_pos_rel,
+            params={"command_name": "motion", "asset_cfg": SceneEntityCfg("robot")},
+        )
+        reference_joint_vel = ObsTerm(
+            func=mdp.reference_joint_vel,
+            params={"command_name": "motion", "asset_cfg": SceneEntityCfg("robot")},
+        )
+
+        # Proxy for the previous control command.
         last_action = ObsTerm(func=base_mdp.last_action)
 
         def __post_init__(self):
@@ -162,18 +170,58 @@ class EventCfg:
 
 @configclass
 class RewardsCfg:
-    # Placeholder reward for the parity test. 
-    alive = RewTerm(func=base_mdp.is_alive, weight=1.0)
+    # Minimal robot-only tracker first. The cube/object terms come after this learns reliably.
+    joint_pos_tracking = RewTerm(
+        func=mdp.joint_pos_tracking_exp,
+        weight=1.0,
+        params={
+            "command_name": "motion",
+            "std": 0.25,
+            "asset_cfg": SceneEntityCfg("robot"),
+        },
+    )
+
+    joint_vel_tracking = RewTerm(
+        func=mdp.joint_vel_tracking_exp,
+        weight=0.25,
+        params={
+            "command_name": "motion",
+            "std": 2.0,
+            "asset_cfg": SceneEntityCfg("robot"),
+        },
+    )
+
+    action_rate = RewTerm(
+        func=base_mdp.action_rate_l2,
+        weight=-0.01,
+    )
+
+    joint_limits = RewTerm(
+        func=base_mdp.joint_pos_limits,
+        weight=-1.0,
+        params={"asset_cfg": SceneEntityCfg("robot")},
+    )
 
 
 @configclass
 class TerminationsCfg:
+    # Reaching the end of a reference is a timeout-like natural end, not a failure.
+    motion_finished = DoneTerm(
+        func=mdp.motion_finished,
+        time_out=True,
+        params={"command_name": "motion"},
+    )
+
+    # Safety fallback only; the motion should normally terminate first.
     time_out = DoneTerm(func=base_mdp.time_out, time_out=True)
+
+    # Do NOT use a large-error termination initially: PPO needs to experience bad states
+    # while it is learning. We can enable this later if rollouts become pathological.
 
 
 @configclass
 class SoftDiceTrackingEnvCfg(ManagerBasedRLEnvCfg):
-    scene: SoftDiceSceneCfg = SoftDiceSceneCfg(num_envs=1, env_spacing=2.0)
+    scene: SoftDiceSceneCfg = SoftDiceSceneCfg(num_envs=256, env_spacing=2.0, replicate_physics=False)
     observations: ObservationsCfg = ObservationsCfg()
     actions: ActionsCfg = ActionsCfg()
     commands: CommandsCfg = CommandsCfg()
@@ -181,11 +229,17 @@ class SoftDiceTrackingEnvCfg(ManagerBasedRLEnvCfg):
     terminations: TerminationsCfg = TerminationsCfg()
     events: EventCfg = EventCfg()
 
+    # Parameters needed to reconstruct the same table layout as the validated replay.
+    cube_size: float = DEFAULT_CUBE_SIZE
+    table_length: float = DEFAULT_TABLE_LENGTH
+    table_width: float = DEFAULT_TABLE_WIDTH
+    ground_z: float = DEFAULT_GROUND_Z
+
     def __post_init__(self):
         self.decimation = 1
-        self.episode_length_s = 60.0
+        self.episode_length_s = 60.0  # hard fallback; motion_finished normally ends earlier
 
-        # Match the working replay first. We can change control frequency after parity.
+        # Preserve replay parity initially.
         self.sim.dt = 1.0 / 60.0
         self.sim.render_interval = self.decimation
         self.sim.physics = PhysxCfg(
@@ -200,38 +254,27 @@ class SoftDiceTrackingEnvCfg(ManagerBasedRLEnvCfg):
         self.viewer.eye = (-2.6, 0.0, 1.5)
         self.viewer.lookat = (0.0, 0.0, 1.1)
 
-    def configure_from_motion(
-        self,
-        motion_file: str,
-        *,
-        start_frame: int = 0,
-        playback_speed: float = 1.0,
-        loop: bool = False,
-        cube_size: float = DEFAULT_CUBE_SIZE,
-        table_length: float = DEFAULT_TABLE_LENGTH,
-        table_width: float = DEFAULT_TABLE_WIDTH,
-        ground_z: float = DEFAULT_GROUND_Z,
-    ) -> None:
-        """Configure command timing and initial table/cube layout from a motion file.
+    def configure_from_motion(self) -> None:
+        """Resolve scene layout from the selected trajectory before scene creation."""
+        validate_asset_paths()
 
-        """
+        motion_file = self.commands.motion.motion_file
+        if not motion_file:
+            raise ValueError(
+                "No motion file configured. For training pass e.g. "
+                "env.commands.motion.motion_file=/absolute/path/to/demo.npz"
+            )
 
-        robot_joint_qpos, fps, root_qpos, object_qpos = load_motion_file(motion_file)
-        del robot_joint_qpos  # parsed again by MotionCommand when the environment is built
+        _, fps, root_qpos, object_qpos = load_motion_file(motion_file)
 
         if root_qpos is None or object_qpos is None:
             raise ValueError(
-                "Step-1 soft-dice tracking expects a motion containing root + robot + object qpos (33 columns)."
+                "Soft-dice tracking currently expects root + H1 + object qpos (33 columns)."
             )
-        if not 0 <= int(start_frame) < root_qpos.shape[0]:
-            raise ValueError(f"start_frame={start_frame} outside the motion range.")
-        if playback_speed <= 0.0:
-            raise ValueError("playback_speed must be > 0.")
 
-        self.commands.motion.motion_file = str(motion_file)
-        self.commands.motion.start_frame = int(start_frame)
-        self.commands.motion.playback_speed = float(playback_speed)
-        self.commands.motion.loop = bool(loop)
+        start_frame = int(self.commands.motion.start_frame)
+        if not 0 <= start_frame < root_qpos.shape[0]:
+            raise ValueError(f"start_frame={start_frame} outside the motion range.")
 
         robot_pos = np.asarray(self.scene.robot.init_state.pos, dtype=np.float32)
         robot_quat = np.asarray(self.scene.robot.init_state.rot, dtype=np.float32)
@@ -239,39 +282,38 @@ class SoftDiceTrackingEnvCfg(ManagerBasedRLEnvCfg):
         cube_pos, _, *_ = desired_cube_pose_from_holosoma(
             root_qpos,
             object_qpos,
-            int(start_frame),
+            start_frame,
             robot_pos,
             robot_quat,
-            reference_offset=None,
-            apply_z_lift=False,
         )
 
-        # Spawn the undeformed asset at the correct center. Orientation is applied by the
-        # reset event through the nodal-state API.
         self.scene.cube.init_state.pos = cube_pos.tolist()
 
-        cube_height = float(cube_size) * float(CUSTOM_DICE_SCALE[2])
+        cube_height = float(self.cube_size) * float(CUSTOM_DICE_SCALE[2])
         cube_bottom_z = float(cube_pos[2] - cube_height / 2.0)
-        table_thickness = cube_bottom_z - float(ground_z)
+        table_thickness = cube_bottom_z - float(self.ground_z)
         if table_thickness <= 0.0:
             raise ValueError(f"Computed table thickness is not positive: {table_thickness}")
 
         table_pos = np.asarray(self.scene.table.init_state.pos, dtype=np.float32)
-        table_pos[0] = float(cube_pos[0] - 0.25)
-        table_pos[1] = float(cube_pos[1])
-        table_pos[2] = float(ground_z + table_thickness / 2.0)
+        table_pos[0] = cube_pos[0] - 0.25
+        table_pos[1] = cube_pos[1]
+        table_pos[2] = float(self.ground_z) + table_thickness / 2.0
 
         self.scene.table.init_state.pos = table_pos.tolist()
         self.scene.table.spawn.size = (
-            float(table_length),
-            float(table_width),
+            float(self.table_length),
+            float(self.table_width),
             float(table_thickness),
         )
 
-        # Avoid timing out before the end of a non-looping parity replay.
-        if loop:
-            self.episode_length_s = 3600.0
-        else:
-            remaining_frames = max(root_qpos.shape[0] - int(start_frame), 1)
-            duration_s = remaining_frames / float(fps) / float(playback_speed)
-            self.episode_length_s = duration_s + 1.0
+        # Keep the hard timeout just beyond the trajectory duration.
+        remaining_frames = root_qpos.shape[0] - start_frame
+        duration = remaining_frames / (float(fps) * float(self.commands.motion.playback_speed))
+        step_dt = float(self.decimation) * float(self.sim.dt)
+        self.episode_length_s = max(duration + step_dt, step_dt)
+
+    def validate_config(self):
+        # Isaac Lab 3 beta2 invokes this after Hydra overrides are applied.
+        # This is why env.commands.motion.motion_file=... can also drive the dependent scene layout.
+        self.configure_from_motion()
