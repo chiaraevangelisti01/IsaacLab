@@ -9,10 +9,24 @@ if TYPE_CHECKING:
     from .motion_command import MotionCommand
 
 
-def motion_finished(env: ManagerBasedRLEnv, command_name: str = "motion") -> torch.Tensor:
-    """End an episode when the final reference frame has been reached."""
+def motion_finished(
+    env: ManagerBasedRLEnv,
+    command_name: str = "motion",
+) -> torch.Tensor:
+    """End the episode at the final reference frame and log final-state errors."""
+
     motion: MotionCommand = env.command_manager.get_term(command_name)
-    return motion.finished
+
+    finished = motion.finished
+
+    finished_env_ids = finished.nonzero(
+        as_tuple=False
+    ).squeeze(-1)
+
+    if finished_env_ids.numel() > 0:
+        motion.record_terminal_metrics(finished_env_ids)
+
+    return finished
 
 
 def excessive_joint_tracking_error(

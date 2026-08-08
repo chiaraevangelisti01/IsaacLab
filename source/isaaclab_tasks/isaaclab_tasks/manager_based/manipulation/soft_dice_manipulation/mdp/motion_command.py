@@ -37,6 +37,7 @@ class MotionCommand(CommandTerm):
             )
 
         self.robot = env.scene[cfg.asset_name]
+        self.cube = env.scene[cfg.cube_name]
 
         joint_qpos_np, fps, root_qpos_np, object_qpos_np = load_motion_file(cfg.motion_file)
         self.motion_fps = float(fps)
@@ -91,7 +92,52 @@ class MotionCommand(CommandTerm):
             dtype=torch.long,
             device=self.device,
         )
+        self._motion_step = torch.zeros(
+            self.num_envs,
+            dtype=torch.long,
+            device=self.device,
+        )
+        # -------------------------------------------------------------------------
+        # Episode tracking metrics
+        # -------------------------------------------------------------------------
         self.metrics["phase"] = torch.zeros(self.num_envs, device=self.device)
+
+        self.metrics["mean_joint_pos_rmse_rad"] = torch.zeros(
+            self.num_envs, dtype=torch.float32, device=self.device
+        )
+
+        self.metrics["mean_joint_vel_rmse_rad_s"] = torch.zeros(
+            self.num_envs, dtype=torch.float32, device=self.device
+        )
+
+        self.metrics["mean_cube_pos_error_m"] = torch.zeros(
+            self.num_envs, dtype=torch.float32, device=self.device
+        )
+
+        self.metrics["final_joint_pos_rmse_rad"] = torch.zeros(
+            self.num_envs, dtype=torch.float32, device=self.device
+        )
+
+        self.metrics["final_cube_pos_error_m"] = torch.zeros(
+            self.num_envs, dtype=torch.float32, device=self.device
+        )
+
+        # Running sums used to compute episode means.
+        self._joint_pos_rmse_sum = torch.zeros(
+            self.num_envs, dtype=torch.float32, device=self.device
+        )
+
+        self._joint_vel_rmse_sum = torch.zeros(
+            self.num_envs, dtype=torch.float32, device=self.device
+        )
+
+        self._cube_pos_error_sum = torch.zeros(
+            self.num_envs, dtype=torch.float32, device=self.device
+        )
+
+        self._metric_step_count = torch.zeros(
+            self.num_envs, dtype=torch.float32, device=self.device
+        )
 
     @staticmethod
     def _differentiate(q: np.ndarray, fps: float) -> np.ndarray:
@@ -156,14 +202,38 @@ class MotionCommand(CommandTerm):
         return self._cube_quat_all[self.cfg.start_frame].unsqueeze(0).repeat(env_ids.numel(), 1)
 
     def _update_metrics(self):
-        denom = max(self.num_frames - 1, 1)
-        self.metrics["phase"][:] = self._frame_idx.float() / float(denom)
+        # ------------------------------------------------------------------
+        # Motion phase
+        # ------------------------------------------------------------------
 
-    def _resample_command(self, env_ids: Sequence[int]):
+        denom = max(self.num_frames - 1, 1)
+
+        self.metrics["phase"][:] = (
+            self._frame_idx.float() / float(denom)
+        )
+
+        # ------------------------------------------------------------------
+        # Reference-tracking errors
+        # ------------------------------------------------------------------
+
+        (
+            joint_pos_rmse,
+            joint_vel_rmse,
+            cube_pos_error,
+        ) = self._compute_tracking_errors()
+
+        self._joint_pos_rmse_sum += joint_pos_rmse
+        self._joint_vel_rmse_sum += joint_vel_rmse
+        self._cube_pos_error_sum += cube_pos_error
+
+        self._metric_step_count += 1.0
+
+    def _resample_command(self, env_ids):
         self._frame_idx[env_ids] = int(self.cfg.start_frame)
+        self._motion_step[env_ids] = 0
 
     def _update_command(self):
-        elapsed_s = self._env.episode_length_buf.float() * float(self._env.step_dt)
+        elapsed_s = self._motion_step.float() * float(self._env.step_dt)
         offset = torch.floor(
             elapsed_s * self.motion_fps * float(self.cfg.playback_speed)
         ).long()
@@ -177,7 +247,88 @@ class MotionCommand(CommandTerm):
                 min=int(self.cfg.start_frame),
                 max=self.num_frames - 1,
             )
+        self._motion_step += 1
 
+    def _compute_tracking_errors(self):
+        """Compute per-environment reference-tracking errors."""
+
+        # Joint position RMSE across joints.
+        joint_pos_error = self.robot.data.joint_pos.torch - self.joint_pos
+
+        joint_pos_rmse = torch.sqrt(
+            torch.mean(torch.square(joint_pos_error), dim=-1)
+        )
+
+        # Joint velocity RMSE across joints.
+        joint_vel_error = self.robot.data.joint_vel.torch - self.joint_vel
+
+        joint_vel_rmse = torch.sqrt(
+            torch.mean(torch.square(joint_vel_error), dim=-1)
+        )
+
+        # Deformable cube center.
+        cube_center_w = self.cube.data.nodal_pos_w.torch.mean(dim=1)
+
+        # Reference cube position is stored in environment-local coordinates.
+        cube_center_e = cube_center_w - self._env.scene.env_origins
+
+        cube_pos_error = torch.linalg.norm(
+            cube_center_e - self.cube_pos,
+            dim=-1,
+        )
+
+        return joint_pos_rmse, joint_vel_rmse, cube_pos_error
+
+    def reset(self, env_ids=None):
+        """Finalize episode tracking metrics before resetting the command."""
+
+        if env_ids is None:
+            env_ids = slice(None)
+
+        count = self._metric_step_count[env_ids].clamp_min(1.0)
+
+        self.metrics["mean_joint_pos_rmse_rad"][env_ids] = (
+            self._joint_pos_rmse_sum[env_ids] / count
+        )
+
+        self.metrics["mean_joint_vel_rmse_rad_s"][env_ids] = (
+            self._joint_vel_rmse_sum[env_ids] / count
+        )
+
+        self.metrics["mean_cube_pos_error_m"][env_ids] = (
+            self._cube_pos_error_sum[env_ids] / count
+        )
+
+        # super().reset() reads self.metrics and returns them to CommandManager.
+        extras = super().reset(env_ids)
+
+        # Clear accumulators for the next episode.
+        self._joint_pos_rmse_sum[env_ids] = 0.0
+        self._joint_vel_rmse_sum[env_ids] = 0.0
+        self._cube_pos_error_sum[env_ids] = 0.0
+        self._metric_step_count[env_ids] = 0.0
+
+        return extras
+
+    def record_terminal_metrics(self, env_ids: torch.Tensor):
+        """Record metrics from the physical state that actually ended the episode."""
+
+        if env_ids.numel() == 0:
+            return
+
+        (
+            joint_pos_rmse,
+            _,
+            cube_pos_error,
+        ) = self._compute_tracking_errors()
+
+        self.metrics["final_joint_pos_rmse_rad"][env_ids] = (
+            joint_pos_rmse[env_ids]
+        )
+
+        self.metrics["final_cube_pos_error_m"][env_ids] = (
+            cube_pos_error[env_ids]
+        )
 
 @configclass
 class MotionCommandCfg(CommandTermCfg):
@@ -189,6 +340,7 @@ class MotionCommandCfg(CommandTermCfg):
     resampling_time_range: tuple[float, float] = (1.0e9, 1.0e9)
 
     asset_name: str = "robot"
+    cube_name: str = "cube"
     motion_file: str = ""
     start_frame: int = 0
     playback_speed: float = 1.0
