@@ -14,6 +14,10 @@ class SoftDiceTrackingPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     max_iterations = 3000
     save_interval = 100
     experiment_name = "soft_dice_tracking_h1"
+    obs_groups = {
+        "actor": ["policy"],
+        "critic": ["policy"],
+    }
 
     actor = RslRlMLPModelCfg(
         hidden_dims=[512, 256, 128],
