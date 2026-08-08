@@ -250,11 +250,10 @@ class SoftDiceTrackingEnvCfg(ManagerBasedRLEnvCfg):
     ground_z: float = DEFAULT_GROUND_Z
 
     def __post_init__(self):
-        self.decimation = 1
+        self.decimation = 4  # 50 Hz control for H1 tracking, 200 Hz sim
         self.episode_length_s = 60.0  # hard fallback; motion_finished normally ends earlier
 
-        # Preserve replay parity initially.
-        self.sim.dt = 1.0 / 60.0
+        self.sim.dt = 1.0 / 200.0
         self.sim.render_interval = self.decimation
         self.sim.physics = PhysxCfg(
             solver_type=1,

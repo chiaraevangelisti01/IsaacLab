@@ -22,7 +22,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--motion_file", type=str, required=True)
 parser.add_argument("--num_envs", type=int, default=1)
 parser.add_argument("--steps", type=int, default=6000)
-parser.add_argument("--dt", type=float, default=1.0 / 60.0)
+parser.add_argument("--dt", type=float, default= None)
 
 parser.add_argument("--motion_start_frame", type=int, default=0)
 parser.add_argument("--motion_loop", action="store_true")
@@ -59,6 +59,8 @@ from isaaclab.envs import ManagerBasedRLEnv
 
 from isaaclab_tasks.manager_based.manipulation.soft_dice_manipulation.soft_dice_env_cfg import (
     SoftDiceTrackingEnvCfg,
+    H1_TRACKING_ACTION_SCALE,
+    H1_TRACKING_JOINT_NAMES,
 )
 
 
@@ -111,7 +113,8 @@ def main():
     cfg.scene.replicate_physics = False
 
     cfg.sim.device = args_cli.device
-    cfg.sim.dt = float(args_cli.dt)
+    if args_cli.dt is not None:
+        cfg.sim.dt = float(args_cli.dt)
     cfg.sim.render_interval = cfg.decimation
 
     # -------------------------------------------------------------------------
@@ -157,6 +160,44 @@ def main():
         motion = env.command_manager.get_term("motion")
 
         # ---------------------------------------------------------------------
+        # Resolve the same controlled joints and action scaling used by the task.
+        # ---------------------------------------------------------------------
+
+        controlled_joint_ids, controlled_joint_names = robot.find_joints(
+            H1_TRACKING_JOINT_NAMES,
+            preserve_order=True,
+        )
+
+        if controlled_joint_names != H1_TRACKING_JOINT_NAMES:
+            raise RuntimeError(
+                "Controlled joint order does not match H1_TRACKING_JOINT_NAMES.\n"
+                f"Expected: {H1_TRACKING_JOINT_NAMES}\n"
+                f"Resolved: {controlled_joint_names}"
+            )
+
+        action_scale = torch.tensor(
+            [
+                H1_TRACKING_ACTION_SCALE[name]
+                for name in controlled_joint_names
+            ],
+            dtype=torch.float32,
+            device=env.device,
+        ).unsqueeze(0)
+
+        # Default joint positions are the offset used internally by
+        # JointPositionAction when use_default_offset=True.
+        q_default_controlled = (
+            robot.data.default_joint_pos.torch[:, controlled_joint_ids].clone()
+        )
+
+        print("\nControlled joints:")
+        for i, name in enumerate(controlled_joint_names):
+            print(
+                f"  {i:2d}: {name:<28} "
+                f"scale={action_scale[0, i].item():.6f} "
+                f"default={q_default_controlled[0, i].item():.6f}"
+            )
+        # ---------------------------------------------------------------------
         # Initial diagnostics
         # ---------------------------------------------------------------------
 
@@ -167,6 +208,7 @@ def main():
         print(f"num_envs:             {env.num_envs}")
         print(f"sim dt:               {env.cfg.sim.dt}")
         print(f"environment step dt:  {env.step_dt}")
+        print(f"decimation:           {env.cfg.decimation}")
 
         print(f"motion fps:            {motion.motion_fps}")
         print(f"motion frames:         {motion.num_frames}")
@@ -211,9 +253,10 @@ def main():
             else:
                 cube_ref_e = None
 
-            # The environment action is an absolute joint-position target,
-            # therefore feeding q_ref reproduces the nominal reference controller.
-            env.step(q_ref)
+            q_ref_controlled = q_ref[:, controlled_joint_ids]
+            reference_action = (q_ref_controlled - q_default_controlled) / action_scale
+
+            env.step(reference_action)
 
             # -----------------------------------------------------------------
             # Diagnostics
@@ -222,9 +265,10 @@ def main():
             if count % 120 == 0:
 
                 q_actual = robot.data.joint_pos.torch
+                q_actual_controlled = q_actual[:, controlled_joint_ids]
 
                 joint_errors = torch.linalg.norm(
-                    q_actual - q_ref,
+                    q_actual_controlled - q_ref_controlled,
                     dim=-1,
                 )
 
@@ -242,7 +286,7 @@ def main():
 
                     msg = (
                         f"env_{env_id}: "
-                        f"joint_L2={joint_errors[env_id].item():.5f}"
+                        f"controlled_joint_L2={joint_errors[env_id].item():.5f}"
                     )
 
                     if cube_ref_e is not None:
