@@ -15,6 +15,7 @@ from .motion_utils import (
     HOLOSOMA_TO_ISAAC_INDICES,
     desired_cube_pose_from_holosoma,
     load_motion_file,
+    resample_motion_to_fps,
 )
 
 if TYPE_CHECKING:
@@ -39,11 +40,43 @@ class MotionCommand(CommandTerm):
         self.robot = env.scene[cfg.asset_name]
         self.cube = env.scene[cfg.cube_name]
 
-        joint_qpos_np, fps, root_qpos_np, object_qpos_np = load_motion_file(cfg.motion_file)
-        self.motion_fps = float(fps)
+        joint_qpos_np, source_fps, root_qpos_np, object_qpos_np = load_motion_file(
+            cfg.motion_file
+        )
 
-        reorder_idx = np.asarray(HOLOSOMA_TO_ISAAC_INDICES, dtype=np.int64)
-        q_np = np.asarray(joint_qpos_np[:, reorder_idx], dtype=np.float32)
+        self.source_motion_fps = float(source_fps)
+
+        source_num_frames = int(joint_qpos_np.shape[0])
+
+        if not 0 <= cfg.start_frame < source_num_frames:
+            raise ValueError(
+                f"start_frame={cfg.start_frame} outside "
+                f"[0, {source_num_frames - 1}]"
+            )
+
+        self.motion_fps = 1.0 / float(env.step_dt)
+
+        (
+            joint_qpos_np,
+            root_qpos_np,
+            object_qpos_np,
+        ) = resample_motion_to_fps(
+            joint_qpos=joint_qpos_np,
+            source_fps=self.source_motion_fps,
+            target_fps=self.motion_fps,
+            root_qpos=root_qpos_np,
+            object_qpos=object_qpos_np,
+        )
+
+        reorder_idx = np.asarray(
+            HOLOSOMA_TO_ISAAC_INDICES,
+            dtype=np.int64,
+        )
+
+        q_np = np.asarray(
+            joint_qpos_np[:, reorder_idx],
+            dtype=np.float32,
+        )
 
         if q_np.shape[1] != self.robot.num_joints:
             raise ValueError(
@@ -56,8 +89,17 @@ class MotionCommand(CommandTerm):
         self._joint_vel_all = torch.as_tensor(qd_np, device=self.device)
         self.num_frames = int(q_np.shape[0])
 
-        if not 0 <= cfg.start_frame < self.num_frames:
-            raise ValueError(f"start_frame={cfg.start_frame} outside [0, {self.num_frames - 1}]")
+        #Convert it to the nearest frame on the resampled reference grid.
+        start_time_s = (
+            float(cfg.start_frame)
+            / self.source_motion_fps
+        )
+
+        self._start_frame = min(
+            int(round(start_time_s * self.motion_fps)),
+            self.num_frames - 1,
+        )
+
         if cfg.playback_speed <= 0.0:
             raise ValueError("playback_speed must be > 0.")
 
@@ -88,7 +130,7 @@ class MotionCommand(CommandTerm):
 
         self._frame_idx = torch.full(
             (self.num_envs,),
-            int(cfg.start_frame),
+            self._start_frame,
             dtype=torch.long,
             device=self.device,
         )
@@ -160,6 +202,10 @@ class MotionCommand(CommandTerm):
         return self._frame_idx
 
     @property
+    def start_frame(self) -> int:
+        return self._start_frame
+
+    @property
     def joint_pos(self) -> torch.Tensor:
         return self._joint_pos_all[self._frame_idx]
 
@@ -186,20 +232,20 @@ class MotionCommand(CommandTerm):
         return self._frame_idx >= self.num_frames - 1
 
     def start_joint_pos(self, env_ids: torch.Tensor) -> torch.Tensor:
-        return self._joint_pos_all[self.cfg.start_frame].unsqueeze(0).repeat(env_ids.numel(), 1)
+        return self._joint_pos_all[self._start_frame].unsqueeze(0).repeat(env_ids.numel(), 1)
 
     def start_joint_vel(self, env_ids: torch.Tensor) -> torch.Tensor:
-        return self._joint_vel_all[self.cfg.start_frame].unsqueeze(0).repeat(env_ids.numel(), 1)
+        return self._joint_vel_all[self._start_frame].unsqueeze(0).repeat(env_ids.numel(), 1)
 
     def start_cube_pos(self, env_ids: torch.Tensor) -> torch.Tensor:
         if self._cube_pos_all is None:
             raise RuntimeError("Motion does not contain an object reference.")
-        return self._cube_pos_all[self.cfg.start_frame].unsqueeze(0).repeat(env_ids.numel(), 1)
+        return self._cube_pos_all[self._start_frame].unsqueeze(0).repeat(env_ids.numel(), 1)
 
     def start_cube_quat(self, env_ids: torch.Tensor) -> torch.Tensor:
         if self._cube_quat_all is None:
             raise RuntimeError("Motion does not contain an object reference.")
-        return self._cube_quat_all[self.cfg.start_frame].unsqueeze(0).repeat(env_ids.numel(), 1)
+        return self._cube_quat_all[self._start_frame].unsqueeze(0).repeat(env_ids.numel(), 1)
 
     def _update_metrics(self):
         # ------------------------------------------------------------------
@@ -229,25 +275,40 @@ class MotionCommand(CommandTerm):
         self._metric_step_count += 1.0
 
     def _resample_command(self, env_ids):
-        self._frame_idx[env_ids] = int(self.cfg.start_frame)
+        self._frame_idx[env_ids] = self._start_frame
         self._motion_step[env_ids] = 0
 
     def _update_command(self):
-        elapsed_s = self._motion_step.float() * float(self._env.step_dt)
+        # This method is called after one environment/control step has
+        # completed. Advance the reference clock first s
+        self._motion_step += 1
+
+        elapsed_s = (
+            self._motion_step.float()
+            * float(self._env.step_dt)
+        )
+
         offset = torch.floor(
-            elapsed_s * self.motion_fps * float(self.cfg.playback_speed)
+            elapsed_s
+            * self.motion_fps
+            * float(self.cfg.playback_speed)
+            + 1.0e-6
         ).long()
 
         if self.cfg.loop:
-            span = self.num_frames - int(self.cfg.start_frame)
-            self._frame_idx[:] = int(self.cfg.start_frame) + torch.remainder(offset, span)
+            span = self.num_frames - self._start_frame
+
+            self._frame_idx[:] = (
+                self._start_frame
+                + torch.remainder(offset, span)
+            )
+
         else:
             self._frame_idx[:] = torch.clamp(
-                int(self.cfg.start_frame) + offset,
-                min=int(self.cfg.start_frame),
+                self._start_frame + offset,
+                min=self._start_frame,
                 max=self.num_frames - 1,
             )
-        self._motion_step += 1
 
     def _compute_tracking_errors(self):
         """Compute per-environment reference-tracking errors."""

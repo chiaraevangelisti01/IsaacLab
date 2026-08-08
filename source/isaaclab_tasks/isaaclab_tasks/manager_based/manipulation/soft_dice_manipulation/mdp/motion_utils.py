@@ -96,6 +96,177 @@ def load_motion_file(path: str):
 
     return robot_joint_qpos, fps, root_qpos, object_qpos
 
+def _resample_linear(
+    values: np.ndarray,
+    source_fps: float,
+    target_times: np.ndarray,
+) -> np.ndarray:
+    """Linearly resample uniformly sampled vector data."""
+
+    source_coord = target_times * float(source_fps)
+
+    idx0 = np.floor(source_coord).astype(np.int64)
+    idx0 = np.clip(idx0, 0, values.shape[0] - 1)
+
+    idx1 = np.minimum(idx0 + 1, values.shape[0] - 1)
+
+    alpha = (source_coord - idx0).astype(np.float32)[:, None]
+
+    return (
+        (1.0 - alpha) * values[idx0]
+        + alpha * values[idx1]
+    ).astype(np.float32)
+
+
+def _resample_quat_wxyz(
+    quats: np.ndarray,
+    source_fps: float,
+    target_times: np.ndarray,
+) -> np.ndarray:
+    """Resample WXYZ quaternions using shortest-path SLERP."""
+
+    q = np.asarray(quats, dtype=np.float64)
+
+    norms = np.linalg.norm(q, axis=-1, keepdims=True)
+    if np.any(norms < 1.0e-8):
+        raise ValueError("Cannot interpolate zero-norm quaternion.")
+
+    q = q / norms
+
+    source_coord = target_times * float(source_fps)
+
+    idx0 = np.floor(source_coord).astype(np.int64)
+    idx0 = np.clip(idx0, 0, q.shape[0] - 1)
+
+    idx1 = np.minimum(idx0 + 1, q.shape[0] - 1)
+
+    alpha = (source_coord - idx0)[:, None]
+
+    q0 = q[idx0]
+    q1 = q[idx1].copy()
+
+    # q and -q represent the same orientation.
+    # Flip q1 when necessary so SLERP follows the shortest path.
+    dot = np.sum(q0 * q1, axis=-1)
+
+    flip = dot < 0.0
+    q1[flip] *= -1.0
+    dot = np.abs(dot)
+
+    dot = np.clip(dot, -1.0, 1.0)
+
+    result = np.empty_like(q0)
+
+    # For very small rotations, normalized linear interpolation
+    # is numerically more stable than SLERP.
+    close = dot > 0.9995
+
+    if np.any(close):
+        result[close] = (
+            (1.0 - alpha[close]) * q0[close]
+            + alpha[close] * q1[close]
+        )
+
+    far = ~close
+
+    if np.any(far):
+        theta = np.arccos(dot[far])[:, None]
+        sin_theta = np.sin(theta)
+
+        w0 = np.sin((1.0 - alpha[far]) * theta) / sin_theta
+        w1 = np.sin(alpha[far] * theta) / sin_theta
+
+        result[far] = w0 * q0[far] + w1 * q1[far]
+
+    result /= np.linalg.norm(result, axis=-1, keepdims=True)
+
+    return result.astype(np.float32)
+
+
+def resample_motion_to_fps(
+    joint_qpos: np.ndarray,
+    source_fps: float,
+    target_fps: float,
+    root_qpos: np.ndarray | None = None,
+    object_qpos: np.ndarray | None = None,
+):
+    """Resample a Holosoma motion onto a fixed target time grid.
+
+    Joint positions and Cartesian positions use linear interpolation.
+    Root/object orientations use quaternion SLERP.
+    """
+
+    if source_fps <= 0.0:
+        raise ValueError("source_fps must be positive.")
+
+    if target_fps <= 0.0:
+        raise ValueError("target_fps must be positive.")
+
+    num_source_frames = joint_qpos.shape[0]
+
+    if num_source_frames == 0:
+        raise ValueError("Motion contains no frames.")
+
+    if root_qpos is not None and root_qpos.shape[0] != num_source_frames:
+        raise ValueError("root_qpos length does not match joint trajectory.")
+
+    if object_qpos is not None and object_qpos.shape[0] != num_source_frames:
+        raise ValueError("object_qpos length does not match joint trajectory.")
+
+    if num_source_frames == 1:
+        return (
+            joint_qpos.copy(),
+            None if root_qpos is None else root_qpos.copy(),
+            None if object_qpos is None else object_qpos.copy(),
+        )
+
+    duration_s = (num_source_frames - 1) / float(source_fps)
+
+    # Fixed target-rate grid:
+    # 0, 1/target_fps, 2/target_fps, ...
+    #
+    # We deliberately do not append a shorter final interval.
+    num_target_frames = (
+        int(np.floor(duration_s * target_fps + 1.0e-9)) + 1
+    )
+
+    target_times = (
+        np.arange(num_target_frames, dtype=np.float64)
+        / float(target_fps)
+    )
+
+    joint_qpos_resampled = _resample_linear(
+        np.asarray(joint_qpos, dtype=np.float32),
+        source_fps,
+        target_times,
+    )
+
+    def resample_pose(qpos):
+        if qpos is None:
+            return None
+
+        pos = _resample_linear(
+            qpos[:, 0:3],
+            source_fps,
+            target_times,
+        )
+
+        quat = _resample_quat_wxyz(
+            qpos[:, 3:7],
+            source_fps,
+            target_times,
+        )
+
+        return np.concatenate((pos, quat), axis=-1).astype(np.float32)
+
+    root_qpos_resampled = resample_pose(root_qpos)
+    object_qpos_resampled = resample_pose(object_qpos)
+
+    return (
+        joint_qpos_resampled,
+        root_qpos_resampled,
+        object_qpos_resampled,
+    )
 
 def _quat_norm_wxyz(q):
     q = np.asarray(q, dtype=np.float64)
