@@ -23,9 +23,7 @@ class SoftDiceTrackingPPORunnerCfg(RslRlOnPolicyRunnerCfg):
         hidden_dims=[512, 256, 128],
         activation="elu",
         obs_normalization=True,
-        # Smaller than BeyondMimic's 1.0 because our current action is an
-        # absolute joint-position target in radians.
-        distribution_cfg=RslRlMLPModelCfg.GaussianDistributionCfg(init_std=0.35),
+        distribution_cfg=RslRlMLPModelCfg.GaussianDistributionCfg(init_std=1.0),
     )
 
     critic = RslRlMLPModelCfg(

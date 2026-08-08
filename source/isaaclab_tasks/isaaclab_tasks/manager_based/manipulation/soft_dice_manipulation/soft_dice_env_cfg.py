@@ -33,6 +33,23 @@ DEFAULT_TABLE_LENGTH = 0.80
 DEFAULT_TABLE_WIDTH = 1.20
 DEFAULT_GROUND_Z = 0.0
 
+H1_TRACKING_JOINT_NAMES = [
+    "torso",
+    "left_shoulder_pitch",
+    "left_shoulder_roll",
+    "left_shoulder_yaw",
+    "left_elbow",
+    "right_shoulder_pitch",
+    "right_shoulder_roll",
+    "right_shoulder_yaw",
+    "right_elbow",
+]
+
+H1_TRACKING_ACTION_SCALE = mdp.build_joint_action_scale(
+    robot_cfg=H1_FIXED_CFG,
+    joint_names=H1_TRACKING_JOINT_NAMES,
+    scale_factor=0.25,
+)
 
 def make_deformable_cube_cfg(prim_path: str) -> DeformableObjectCfg:
     return DeformableObjectCfg(
@@ -114,18 +131,12 @@ class CommandsCfg:
 
 @configclass
 class ActionsCfg:
-    # Keep the same absolute position-target interface that passed the parity test.
-    # If PPO struggles, the next change should be normalized residual actions.
     joint_pos = base_mdp.JointPositionActionCfg(
         asset_name="robot",
-        joint_names=[
-            "torso",
-            ".*_shoulder_.*",
-            ".*_elbow",],
-        scale=1.0,
-        offset=0.0,
-        use_default_offset=False,
-        preserve_order=False,
+        joint_names=H1_TRACKING_JOINT_NAMES,
+        scale=H1_TRACKING_ACTION_SCALE,
+        use_default_offset=True,
+        preserve_order=True,
     )
 
 
