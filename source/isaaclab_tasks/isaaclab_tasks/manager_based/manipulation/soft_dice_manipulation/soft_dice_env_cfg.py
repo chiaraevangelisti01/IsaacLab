@@ -118,7 +118,10 @@ class ActionsCfg:
     # If PPO struggles, the next change should be normalized residual actions.
     joint_pos = base_mdp.JointPositionActionCfg(
         asset_name="robot",
-        joint_names=[".*"],
+        joint_names=[
+            "torso",
+            ".*_shoulder_.*",
+            ".*_elbow",],
         scale=1.0,
         offset=0.0,
         use_default_offset=False,
