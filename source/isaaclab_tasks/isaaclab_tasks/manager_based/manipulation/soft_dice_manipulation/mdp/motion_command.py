@@ -9,7 +9,12 @@ import torch
 
 from isaaclab.managers import CommandTermCfg, CommandTerm
 from isaaclab.utils.configclass import configclass
-
+from isaaclab.utils.math import (
+    quat_apply,
+    quat_inv,
+    quat_mul,
+    yaw_quat,
+)
 
 from .motion_utils import (
     H1_TRACKED_BODY_NAMES,
@@ -302,6 +307,81 @@ class MotionCommand(CommandTerm):
                 body_pos_ref,
                 body_quat_ref,
             )
+    
+    def aligned_body_reference(
+        self,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Align body references to the current torso yaw.
+        """
+
+        body_pos_ref = self.body_pos
+        body_quat_ref = self.body_quat
+
+        torso_index = H1_TRACKED_BODY_NAMES.index(
+            "torso_link"
+        )
+
+        # --------------------------------------------------------------
+        # Reference torso pose.
+        # --------------------------------------------------------------
+        torso_pos_ref = body_pos_ref[
+            :, torso_index, :
+        ]
+        torso_quat_ref = body_quat_ref[
+            :, torso_index, :
+        ]
+
+        # --------------------------------------------------------------
+        # Current actual torso orientation.
+        # --------------------------------------------------------------
+        torso_quat_robot = self.robot_body_quat[
+            :, torso_index, :
+        ]
+
+        # --------------------------------------------------------------
+        # BeyondMimic-style orientation alignment, reduced to yaw only:
+        # --------------------------------------------------------------
+        delta_yaw = yaw_quat(
+            quat_mul(
+                torso_quat_robot,
+                quat_inv(torso_quat_ref),
+            )
+        )
+
+        # Apply the same yaw rotation to every tracked body.
+        num_bodies = body_pos_ref.shape[1]
+
+        delta_yaw_bodies = delta_yaw[:, None, :].expand(
+            -1,
+            num_bodies,
+            -1,
+        )
+
+        # --------------------------------------------------------------
+        # Rotate body positions ABOUT THE REFERENCE TORSO.
+        # --------------------------------------------------------------
+        body_pos_from_torso = (
+            body_pos_ref
+            - torso_pos_ref[:, None, :]
+        )
+
+        body_pos_aligned = (
+            torso_pos_ref[:, None, :]
+            + quat_apply(
+                delta_yaw_bodies,
+                body_pos_from_torso,
+            )
+        )
+
+        # --------------------------------------------------------------
+        # Orientations receive the same yaw alignment.
+        # --------------------------------------------------------------
+        body_quat_aligned = quat_mul(
+            delta_yaw_bodies,
+            body_quat_ref,
+        )
+
+        return body_pos_aligned, body_quat_aligned
 
     @staticmethod
     def _differentiate(q: np.ndarray, fps: float) -> np.ndarray:
@@ -352,6 +432,57 @@ class MotionCommand(CommandTerm):
         if self.cfg.loop:
             return torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         return self._frame_idx >= self.num_frames - 1
+
+    @property
+    def body_pos(self) -> torch.Tensor:
+        """Current fixed-root Cartesian body-position reference."""
+        if not self.has_body_reference:
+            raise RuntimeError(
+                "Motion does not contain Cartesian body references."
+            )
+
+        return self._body_pos_all[self._frame_idx]
+
+
+    @property
+    def body_quat(self) -> torch.Tensor:
+        """Current fixed-root Cartesian body-orientation reference."""
+        if not self.has_body_reference:
+            raise RuntimeError(
+                "Motion does not contain Cartesian body references."
+            )
+
+        return self._body_quat_all[self._frame_idx]
+
+    @property
+    def robot_body_pos(self) -> torch.Tensor:
+        """Current tracked-body positions in environment-local coordinates."""
+        if not self.has_body_reference:
+            raise RuntimeError(
+                "Motion does not contain Cartesian body references."
+            )
+
+        body_pos_w = self.robot.data.body_link_pose_w.torch[
+            :, self._tracked_body_ids, :3
+        ]
+
+        return (
+            body_pos_w
+            - self._env.scene.env_origins[:, None, :]
+        )
+
+
+    @property
+    def robot_body_quat(self) -> torch.Tensor:
+        """Current tracked-body orientations in XYZW convention."""
+        if not self.has_body_reference:
+            raise RuntimeError(
+                "Motion does not contain Cartesian body references."
+            )
+
+        return self.robot.data.body_link_pose_w.torch[
+            :, self._tracked_body_ids, 3:7
+        ]
 
     def start_joint_pos(self, env_ids: torch.Tensor) -> torch.Tensor:
         return self._joint_pos_all[self._start_frame].unsqueeze(0).repeat(env_ids.numel(), 1)
