@@ -14,6 +14,7 @@ from isaaclab.managers import SceneEntityCfg
 from isaaclab.managers import TerminationTermCfg as DoneTerm
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.utils.configclass import configclass
+from isaaclab.utils.noise import UniformNoiseCfg as Unoise
 from isaaclab_assets.robots.unitree_h1_aist import H1_FIXED_CFG
 from isaaclab_physx.physics import PhysxCfg
 from isaaclab_physx.sim import PhysxDeformableBodyMaterialCfg
@@ -142,32 +143,152 @@ class ActionsCfg:
 
 @configclass
 class ObservationsCfg:
+    """BeyondMimic-style observations adapted to fixed-base H1."""
+
     @configclass
     class PolicyCfg(ObsGroup):
-        # Current robot state.
-        joint_pos = ObsTerm(func=base_mdp.joint_pos_rel)
-        joint_vel = ObsTerm(func=base_mdp.joint_vel_rel)
+        """Actor observations."""
 
-        # Current reference cue.
-        reference_joint_pos = ObsTerm(
-            func=mdp.reference_joint_pos_rel,
-            params={"command_name": "motion", "asset_cfg": SceneEntityCfg("robot")},
-        )
-        reference_joint_vel = ObsTerm(
-            func=mdp.reference_joint_vel,
-            params={"command_name": "motion", "asset_cfg": SceneEntityCfg("robot")},
+        # ----------------------------------------------------------
+        # Reference command: q_ref + qdot_ref.
+        # BeyondMimic provides these directly, not relative to
+        # default joint positions.
+        # ----------------------------------------------------------
+        command = ObsTerm(
+            func=mdp.reference_joint_command,
+            params={
+                "command_name": "motion",
+                "asset_cfg": SceneEntityCfg(
+                    "robot",
+                    joint_names=H1_TRACKING_JOINT_NAMES,
+                    preserve_order=True,
+                ),
+            },
         )
 
-        # Proxy for the previous control command.
-        last_action = ObsTerm(func=base_mdp.last_action)
+        # ----------------------------------------------------------
+        # Demonstrated torso orientation relative to current torso.
+        # ----------------------------------------------------------
+        motion_anchor_ori_b = ObsTerm(
+            func=mdp.motion_anchor_ori_b,
+            params={
+                "command_name": "motion",
+            },
+            noise=Unoise(
+                n_min=-0.05,
+                n_max=0.05,
+            ),
+        )
+
+        # ----------------------------------------------------------
+        # Current controlled joint state.
+        # ----------------------------------------------------------
+        joint_pos = ObsTerm(
+            func=base_mdp.joint_pos_rel,
+            params={
+                "asset_cfg": SceneEntityCfg(
+                    "robot",
+                    joint_names=H1_TRACKING_JOINT_NAMES,
+                    preserve_order=True,
+                ),
+            },
+            noise=Unoise(
+                n_min=-0.01,
+                n_max=0.01,
+            ),
+        )
+
+        joint_vel = ObsTerm(
+            func=base_mdp.joint_vel_rel,
+            params={
+                "asset_cfg": SceneEntityCfg(
+                    "robot",
+                    joint_names=H1_TRACKING_JOINT_NAMES,
+                    preserve_order=True,
+                ),
+            },
+            noise=Unoise(
+                n_min=-0.5,
+                n_max=0.5,
+            ),
+        )
+
+        actions = ObsTerm(
+            func=base_mdp.last_action
+        )
 
         def __post_init__(self):
-            self.enable_corruption = False
+            self.enable_corruption = True
             self.concatenate_terms = True
 
+    @configclass
+    class PrivilegedCfg(ObsGroup):
+        """Critic observations."""
+
+        command = ObsTerm(
+            func=mdp.reference_joint_command,
+            params={
+                "command_name": "motion",
+                "asset_cfg": SceneEntityCfg(
+                    "robot",
+                    joint_names=H1_TRACKING_JOINT_NAMES,
+                    preserve_order=True,
+                ),
+            },
+        )
+
+        motion_anchor_ori_b = ObsTerm(
+            func=mdp.motion_anchor_ori_b,
+            params={
+                "command_name": "motion",
+            },
+        )
+
+        # Actual Cartesian body state relative to torso.
+        body_pos = ObsTerm(
+            func=mdp.robot_body_pos_b,
+            params={
+                "command_name": "motion",
+            },
+        )
+
+        body_ori = ObsTerm(
+            func=mdp.robot_body_ori_b,
+            params={
+                "command_name": "motion",
+            },
+        )
+
+        joint_pos = ObsTerm(
+            func=base_mdp.joint_pos_rel,
+            params={
+                "asset_cfg": SceneEntityCfg(
+                    "robot",
+                    joint_names=H1_TRACKING_JOINT_NAMES,
+                    preserve_order=True,
+                ),
+            },
+        )
+
+        joint_vel = ObsTerm(
+            func=base_mdp.joint_vel_rel,
+            params={
+                "asset_cfg": SceneEntityCfg(
+                    "robot",
+                    joint_names=H1_TRACKING_JOINT_NAMES,
+                    preserve_order=True,
+                ),
+            },
+        )
+
+        actions = ObsTerm(
+            func=base_mdp.last_action
+        )
+
     policy: PolicyCfg = PolicyCfg()
+    critic: PrivilegedCfg = PrivilegedCfg()
 
-
+    
 @configclass
 class EventCfg:
     reset_to_reference = EventTerm(

@@ -16,7 +16,7 @@ class SoftDiceTrackingPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     experiment_name = "soft_dice_tracking_h1"
     obs_groups = {
         "actor": ["policy"],
-        "critic": ["policy"],
+        "critic": ["critic"],
     }
 
     actor = RslRlMLPModelCfg(

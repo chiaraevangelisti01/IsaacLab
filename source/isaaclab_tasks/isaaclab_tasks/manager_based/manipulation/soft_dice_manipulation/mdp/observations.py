@@ -5,6 +5,12 @@ from typing import TYPE_CHECKING
 import torch
 
 from isaaclab.managers import SceneEntityCfg
+from isaaclab.utils.math import (
+    matrix_from_quat,
+    subtract_frame_transforms,
+)
+
+from .motion_utils import H1_TRACKED_BODY_NAMES
 
 if TYPE_CHECKING:
     from isaaclab.assets import Articulation
@@ -12,35 +18,134 @@ if TYPE_CHECKING:
     from .motion_command import MotionCommand
 
 
-def reference_joint_pos_rel(
+def reference_joint_command(
     env: ManagerBasedRLEnv,
     command_name: str = "motion",
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
 ) -> torch.Tensor:
-    """Reference joint positions relative to the articulation default pose."""
-    robot: Articulation = env.scene[asset_cfg.name]
-    motion: MotionCommand = env.command_manager.get_term(command_name)
+    """Reference q and qdot for the joints controlled by the policy."""
 
-    reference = motion.joint_pos[:, asset_cfg.joint_ids]
-    default = robot.data.default_joint_pos.torch[:, asset_cfg.joint_ids]
-    return reference - default
+    motion: MotionCommand = env.command_manager.get_term(
+        command_name
+    )
 
-
-def reference_joint_vel(
-    env: ManagerBasedRLEnv,
-    command_name: str = "motion",
-    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
-) -> torch.Tensor:
-    """Numerically differentiated reference joint velocities."""
-    motion: MotionCommand = env.command_manager.get_term(command_name)
-    return motion.joint_vel[:, asset_cfg.joint_ids]
+    return torch.cat(
+        (
+            motion.joint_pos[:, asset_cfg.joint_ids],
+            motion.joint_vel[:, asset_cfg.joint_ids],
+        ),
+        dim=-1,
+    )
 
 
-def motion_phase(
+def motion_anchor_ori_b(
     env: ManagerBasedRLEnv,
     command_name: str = "motion",
 ) -> torch.Tensor:
-    """Normalized reference phase in [0, 1]"""
-    motion: MotionCommand = env.command_manager.get_term(command_name)
-    denom = max(motion.num_frames - 1, 1)
-    return (motion.frame_idx.float() / float(denom)).unsqueeze(-1)
+    """Reference torso orientation relative to the current torso."""
+
+    motion: MotionCommand = env.command_manager.get_term(
+        command_name
+    )
+
+    torso_idx = H1_TRACKED_BODY_NAMES.index(
+        "torso_link"
+    )
+
+    _, ori_b = subtract_frame_transforms(
+        motion.robot_body_pos[:, torso_idx],
+        motion.robot_body_quat[:, torso_idx],
+        motion.body_pos[:, torso_idx],
+        motion.body_quat[:, torso_idx],
+    )
+
+    mat = matrix_from_quat(ori_b)
+
+    # BeyondMimic 6D orientation representation:
+    # first two columns of the rotation matrix.
+    return mat[..., :2].reshape(
+        env.num_envs,
+        -1,
+    )
+
+
+def robot_body_pos_b(
+    env: ManagerBasedRLEnv,
+    command_name: str = "motion",
+) -> torch.Tensor:
+    """Actual tracked-body positions relative to the actual torso."""
+
+    motion: MotionCommand = env.command_manager.get_term(
+        command_name
+    )
+
+    torso_idx = H1_TRACKED_BODY_NAMES.index(
+        "torso_link"
+    )
+
+    num_bodies = len(H1_TRACKED_BODY_NAMES)
+
+    torso_pos = motion.robot_body_pos[
+        :, torso_idx, :
+    ]
+    torso_quat = motion.robot_body_quat[
+        :, torso_idx, :
+    ]
+
+    pos_b, _ = subtract_frame_transforms(
+        torso_pos[:, None, :].repeat(
+            1, num_bodies, 1
+        ),
+        torso_quat[:, None, :].repeat(
+            1, num_bodies, 1
+        ),
+        motion.robot_body_pos,
+        motion.robot_body_quat,
+    )
+
+    return pos_b.reshape(
+        env.num_envs,
+        -1,
+    )
+
+
+def robot_body_ori_b(
+    env: ManagerBasedRLEnv,
+    command_name: str = "motion",
+) -> torch.Tensor:
+    """Actual tracked-body orientations relative to the actual torso."""
+
+    motion: MotionCommand = env.command_manager.get_term(
+        command_name
+    )
+
+    torso_idx = H1_TRACKED_BODY_NAMES.index(
+        "torso_link"
+    )
+
+    num_bodies = len(H1_TRACKED_BODY_NAMES)
+
+    torso_pos = motion.robot_body_pos[
+        :, torso_idx, :
+    ]
+    torso_quat = motion.robot_body_quat[
+        :, torso_idx, :
+    ]
+
+    _, ori_b = subtract_frame_transforms(
+        torso_pos[:, None, :].repeat(
+            1, num_bodies, 1
+        ),
+        torso_quat[:, None, :].repeat(
+            1, num_bodies, 1
+        ),
+        motion.robot_body_pos,
+        motion.robot_body_quat,
+    )
+
+    mat = matrix_from_quat(ori_b)
+
+    return mat[..., :2].reshape(
+        env.num_envs,
+        -1,
+    )
