@@ -5,51 +5,138 @@ from typing import TYPE_CHECKING
 import torch
 
 from isaaclab.managers import SceneEntityCfg
+from isaaclab.utils.math import quat_error_magnitude
+
+from .motion_utils import H1_TRACKED_BODY_NAMES
 
 if TYPE_CHECKING:
     from isaaclab.assets import Articulation
     from isaaclab.envs import ManagerBasedRLEnv
     from .motion_command import MotionCommand
 
-
-def joint_pos_tracking_exp(
+def motion_global_anchor_orientation_error_exp(
     env: ManagerBasedRLEnv,
     command_name: str,
     std: float,
-    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
 ) -> torch.Tensor:
-    """Gaussian tracking reward from mean squared joint-position error."""
-    robot: Articulation = env.scene[asset_cfg.name]
-    motion: MotionCommand = env.command_manager.get_term(command_name)
+    """Track the demonstrated torso orientation."""
 
-    error = robot.data.joint_pos.torch[:, asset_cfg.joint_ids] - motion.joint_pos[:, asset_cfg.joint_ids]
-    mse = torch.mean(torch.square(error), dim=1)
-    return torch.exp(-mse / (std * std))
+    motion: MotionCommand = env.command_manager.get_term(
+        command_name
+    )
+
+    torso_idx = H1_TRACKED_BODY_NAMES.index(
+        "torso_link"
+    )
+
+    error = quat_error_magnitude(
+        motion.body_quat[:, torso_idx],
+        motion.robot_body_quat[:, torso_idx],
+    ) ** 2
+
+    return torch.exp(
+        -error / (std * std)
+    )
 
 
-def joint_vel_tracking_exp(
+def motion_relative_body_position_error_exp(
     env: ManagerBasedRLEnv,
     command_name: str,
     std: float,
-    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
 ) -> torch.Tensor:
-    """Gaussian tracking reward from mean squared joint-velocity error."""
-    robot: Articulation = env.scene[asset_cfg.name]
-    motion: MotionCommand = env.command_manager.get_term(command_name)
+    """Track yaw-aligned Cartesian body positions."""
 
-    error = robot.data.joint_vel.torch[:, asset_cfg.joint_ids] - motion.joint_vel[:, asset_cfg.joint_ids]
-    mse = torch.mean(torch.square(error), dim=1)
-    return torch.exp(-mse / (std * std))
+    motion: MotionCommand = env.command_manager.get_term(
+        command_name
+    )
+
+    body_pos_ref, _ = motion.aligned_body_reference()
+
+    error = torch.sum(
+        torch.square(
+            body_pos_ref
+            - motion.robot_body_pos
+        ),
+        dim=-1,
+    )
+
+    return torch.exp(
+        -torch.mean(error, dim=-1)
+        / (std * std)
+    )
 
 
-def mean_joint_pos_error(
+def motion_relative_body_orientation_error_exp(
     env: ManagerBasedRLEnv,
     command_name: str,
-    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    std: float,
 ) -> torch.Tensor:
-    """Mean absolute joint error, useful as a logged diagnostic or termination signal."""
-    robot: Articulation = env.scene[asset_cfg.name]
-    motion: MotionCommand = env.command_manager.get_term(command_name)
+    """Track yaw-aligned Cartesian body orientations."""
 
-    error = robot.data.joint_pos.torch[:, asset_cfg.joint_ids] - motion.joint_pos[:, asset_cfg.joint_ids]
-    return torch.mean(torch.abs(error), dim=1)
+    motion: MotionCommand = env.command_manager.get_term(
+        command_name
+    )
+
+    _, body_quat_ref = motion.aligned_body_reference()
+
+    error = quat_error_magnitude(
+        body_quat_ref,
+        motion.robot_body_quat,
+    ) ** 2
+
+    return torch.exp(
+        -torch.mean(error, dim=-1)
+        / (std * std)
+    )
+
+
+def motion_global_body_linear_velocity_error_exp(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    std: float,
+) -> torch.Tensor:
+    """Track fixed-root Cartesian body linear velocities."""
+
+    motion: MotionCommand = env.command_manager.get_term(
+        command_name
+    )
+
+    error = torch.sum(
+        torch.square(
+            motion.body_lin_vel
+            - motion.robot_body_lin_vel
+        ),
+        dim=-1,
+    )
+
+    return torch.exp(
+        -torch.mean(error, dim=-1)
+        / (std * std)
+    )
+
+
+def motion_global_body_angular_velocity_error_exp(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    std: float,
+) -> torch.Tensor:
+    """Track fixed-root Cartesian body angular velocities."""
+
+    motion: MotionCommand = env.command_manager.get_term(
+        command_name
+    )
+
+    error = torch.sum(
+        torch.square(
+            motion.body_ang_vel
+            - motion.robot_body_ang_vel
+        ),
+        dim=-1,
+    )
+
+    return torch.exp(
+        -torch.mean(error, dim=-1)
+        / (std * std)
+    )
+
+

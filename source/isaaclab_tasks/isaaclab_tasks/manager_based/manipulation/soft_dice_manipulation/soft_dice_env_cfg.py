@@ -184,36 +184,76 @@ class EventCfg:
 
 @configclass
 class RewardsCfg:
-    # Minimal robot-only tracker first. The cube/object terms come after this learns reliably.
-    joint_pos_tracking = RewTerm(
-        func=mdp.joint_pos_tracking_exp,
+    """BeyondMimic-style robot motion-tracking rewards."""
+
+    # --------------------------------------------------------------
+    # Anchor tracking.
+    # --------------------------------------------------------------
+    motion_global_anchor_ori = RewTerm(
+        func=mdp.motion_global_anchor_orientation_error_exp,
+        weight=0.5,
+        params={
+            "command_name": "motion",
+            "std": 0.4,
+        },
+    )
+
+    # --------------------------------------------------------------
+    # Cartesian body pose tracking.
+    # --------------------------------------------------------------
+    motion_body_pos = RewTerm(
+        func=mdp.motion_relative_body_position_error_exp,
         weight=1.0,
         params={
             "command_name": "motion",
-            "std": 0.25,
-            "asset_cfg": SceneEntityCfg("robot"),
+            "std": 0.3,
         },
     )
 
-    joint_vel_tracking = RewTerm(
-        func=mdp.joint_vel_tracking_exp,
-        weight=0.25,
+    motion_body_ori = RewTerm(
+        func=mdp.motion_relative_body_orientation_error_exp,
+        weight=1.0,
         params={
             "command_name": "motion",
-            "std": 2.0,
-            "asset_cfg": SceneEntityCfg("robot"),
+            "std": 0.4,
         },
     )
 
+    # --------------------------------------------------------------
+    # Cartesian body velocity tracking.
+    # --------------------------------------------------------------
+    motion_body_lin_vel = RewTerm(
+        func=mdp.motion_global_body_linear_velocity_error_exp,
+        weight=1.0,
+        params={
+            "command_name": "motion",
+            "std": 1.0,
+        },
+    )
+
+    motion_body_ang_vel = RewTerm(
+        func=mdp.motion_global_body_angular_velocity_error_exp,
+        weight=1.0,
+        params={
+            "command_name": "motion",
+            "std": 3.14,
+        },
+    )
+
+    # --------------------------------------------------------------
+    # Regularization.
+    # --------------------------------------------------------------
     action_rate = RewTerm(
         func=base_mdp.action_rate_l2,
-        weight=-0.01,
+        weight=-0.1,
     )
 
     joint_limits = RewTerm(
         func=base_mdp.joint_pos_limits,
-        weight=-1.0,
-        params={"asset_cfg": SceneEntityCfg("robot")},
+        weight=-10.0,
+        params={
+            "asset_cfg": SceneEntityCfg("robot"),
+        },
     )
 
 

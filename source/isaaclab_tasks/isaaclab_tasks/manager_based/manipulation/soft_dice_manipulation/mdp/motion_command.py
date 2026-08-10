@@ -10,9 +10,11 @@ import torch
 from isaaclab.managers import CommandTermCfg, CommandTerm
 from isaaclab.utils.configclass import configclass
 from isaaclab.utils.math import (
+    axis_angle_from_quat,
     quat_apply,
     quat_inv,
     quat_mul,
+    quat_unique,
     yaw_quat,
 )
 
@@ -108,6 +110,24 @@ class MotionCommand(CommandTerm):
                 object_qpos=object_qpos_np,
             )
 
+        # ---------------------------------------------------------------------
+        # Fixed-root Cartesian body velocities.
+        # ---------------------------------------------------------------------
+        if self.has_body_reference:
+            self._body_lin_vel_all = self._differentiate(
+                self._body_pos_all,
+                self.motion_fps,
+            )
+
+            self._body_ang_vel_all = self._differentiate_quat(
+                self._body_quat_all,
+                self.motion_fps,
+            )
+        else:
+            self._body_lin_vel_all = None
+            self._body_ang_vel_all = None
+
+        _all.abs().max().item(),
 
         reorder_idx = np.asarray(
             HOLOSOMA_TO_ISAAC_INDICES,
@@ -384,16 +404,113 @@ class MotionCommand(CommandTerm):
         return body_pos_aligned, body_quat_aligned
 
     @staticmethod
-    def _differentiate(q: np.ndarray, fps: float) -> np.ndarray:
-        if q.shape[0] <= 1:
-            return np.zeros_like(q, dtype=np.float32)
+    def _differentiate(
+        values: np.ndarray | torch.Tensor,
+        fps: float,
+    ) -> np.ndarray | torch.Tensor:
+        """Finite-difference values along the time dimension."""
+
+        if values.shape[0] <= 1:
+            if isinstance(values, torch.Tensor):
+                return torch.zeros_like(values)
+            return np.zeros_like(values, dtype=np.float32)
 
         dt = 1.0 / float(fps)
-        qd = np.zeros_like(q, dtype=np.float32)
-        qd[1:-1] = (q[2:] - q[:-2]) / (2.0 * dt)
-        qd[0] = (q[1] - q[0]) / dt
-        qd[-1] = (q[-1] - q[-2]) / dt
-        return qd
+
+        if isinstance(values, torch.Tensor):
+            derivative = torch.zeros_like(values)
+        else:
+            derivative = np.zeros_like(
+                values,
+                dtype=np.float32,
+            )
+
+        derivative[1:-1] = (
+            values[2:] - values[:-2]
+        ) / (2.0 * dt)
+
+        derivative[0] = (
+            values[1] - values[0]
+        ) / dt
+
+        derivative[-1] = (
+            values[-1] - values[-2]
+        ) / dt
+
+        return derivative
+
+    @staticmethod
+    def _differentiate_quat(
+        quat: torch.Tensor,
+        fps: float,
+    ) -> torch.Tensor:
+        """Compute world-frame angular velocity from an XYZW quaternion trajectory."""
+
+        num_frames = quat.shape[0]
+
+        ang_vel = torch.zeros(
+            (*quat.shape[:-1], 3),
+            dtype=quat.dtype,
+            device=quat.device,
+        )
+
+        if num_frames <= 1:
+            return ang_vel
+
+        dt = 1.0 / float(fps)
+
+        def relative_axis_angle(
+            q_next: torch.Tensor,
+            q_prev: torch.Tensor,
+        ) -> torch.Tensor:
+            shape = q_next.shape[:-1]
+
+            q_next_flat = q_next.reshape(-1, 4)
+            q_prev_flat = q_prev.reshape(-1, 4)
+
+            # Relative spatial/world rotation:
+            # q_delta = q_next * inverse(q_prev)
+            q_delta = quat_mul(
+                q_next_flat,
+                quat_inv(q_prev_flat),
+            )
+
+            # q and -q represent the same orientation. Choose the
+            # shortest rotation before converting to axis-angle.
+            q_delta = quat_unique(q_delta)
+
+            return axis_angle_from_quat(
+                q_delta
+            ).reshape(*shape, 3)
+
+        # Central difference.
+        ang_vel[1:-1] = (
+            relative_axis_angle(
+                quat[2:],
+                quat[:-2],
+            )
+            / (2.0 * dt)
+        )
+
+        # Forward difference at the first frame.
+        ang_vel[0] = (
+            relative_axis_angle(
+                quat[1],
+                quat[0],
+            )
+            / dt
+        )
+
+        # Backward difference at the last frame.
+        ang_vel[-1] = (
+            relative_axis_angle(
+                quat[-1],
+                quat[-2],
+            )
+            / dt
+        )
+
+        return ang_vel
 
     @property
     def command(self) -> torch.Tensor:
@@ -482,6 +599,52 @@ class MotionCommand(CommandTerm):
 
         return self.robot.data.body_link_pose_w.torch[
             :, self._tracked_body_ids, 3:7
+        ]
+
+    @property
+    def body_lin_vel(self) -> torch.Tensor:
+        """Current fixed-root Cartesian body linear-velocity reference."""
+        if self._body_lin_vel_all is None:
+            raise RuntimeError(
+                "Motion does not contain Cartesian body references."
+            )
+
+        return self._body_lin_vel_all[self._frame_idx]
+
+
+    @property
+    def body_ang_vel(self) -> torch.Tensor:
+        """Current fixed-root Cartesian body angular-velocity reference."""
+        if self._body_ang_vel_all is None:
+            raise RuntimeError(
+                "Motion does not contain Cartesian body references."
+            )
+
+        return self._body_ang_vel_all[self._frame_idx]
+
+    @property
+    def robot_body_lin_vel(self) -> torch.Tensor:
+        """Current tracked-link linear velocities in world axes."""
+        if not self.has_body_reference:
+            raise RuntimeError(
+                "Motion does not contain Cartesian body references."
+            )
+
+        return self.robot.data.body_link_lin_vel_w.torch[
+            :, self._tracked_body_ids, :
+        ]
+
+
+    @property
+    def robot_body_ang_vel(self) -> torch.Tensor:
+        """Current tracked-link angular velocities in world axes."""
+        if not self.has_body_reference:
+            raise RuntimeError(
+                "Motion does not contain Cartesian body references."
+            )
+
+        return self.robot.data.body_link_ang_vel_w.torch[
+            :, self._tracked_body_ids, :
         ]
 
     def start_joint_pos(self, env_ids: torch.Tensor) -> torch.Tensor:
