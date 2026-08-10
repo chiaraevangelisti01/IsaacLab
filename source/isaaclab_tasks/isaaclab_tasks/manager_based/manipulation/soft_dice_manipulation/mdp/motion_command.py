@@ -40,7 +40,7 @@ class MotionCommand(CommandTerm):
         self.robot = env.scene[cfg.asset_name]
         self.cube = env.scene[cfg.cube_name]
 
-        joint_qpos_np, source_fps, root_qpos_np, object_qpos_np = load_motion_file(
+        joint_qpos_np, joint_qvel_np, source_fps, root_qpos_np, object_qpos_np = load_motion_file(
             cfg.motion_file
         )
 
@@ -56,17 +56,21 @@ class MotionCommand(CommandTerm):
 
         self.motion_fps = 1.0 / float(env.step_dt)
 
-        (
-            joint_qpos_np,
-            root_qpos_np,
-            object_qpos_np,
-        ) = resample_motion_to_fps(
-            joint_qpos=joint_qpos_np,
-            source_fps=self.source_motion_fps,
-            target_fps=self.motion_fps,
-            root_qpos=root_qpos_np,
-            object_qpos=object_qpos_np,
-        )
+        need_resampling = not np.isclose(self.motion_fps, self.source_motion_fps, rtol = 0.0, atol = 1.0e-6)
+
+        if need_resampling:
+
+            (
+                joint_qpos_np,
+                root_qpos_np,
+                object_qpos_np,
+            ) = resample_motion_to_fps(
+                joint_qpos=joint_qpos_np,
+                source_fps=self.source_motion_fps,
+                target_fps=self.motion_fps,
+                root_qpos=root_qpos_np,
+                object_qpos=object_qpos_np,
+            )
 
         reorder_idx = np.asarray(
             HOLOSOMA_TO_ISAAC_INDICES,
@@ -83,7 +87,13 @@ class MotionCommand(CommandTerm):
                 f"Reference has {q_np.shape[1]} joints after reordering; robot has {self.robot.num_joints}."
             )
 
-        qd_np = self._differentiate(q_np, self.motion_fps)
+        if joint_qvel_np is not None and not need_resampling:
+            qd_np = np.asarray(
+                joint_qvel_np[:, reorder_idx],
+                dtype=np.float32,
+            )
+        else:
+            qd_np = self._differentiate(q_np, self.motion_fps)
 
         self._joint_pos_all = torch.as_tensor(q_np, device=self.device)
         self._joint_vel_all = torch.as_tensor(qd_np, device=self.device)

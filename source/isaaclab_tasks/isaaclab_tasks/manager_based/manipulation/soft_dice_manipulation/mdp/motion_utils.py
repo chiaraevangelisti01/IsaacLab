@@ -52,7 +52,8 @@ def validate_asset_paths() -> None:
 
 
 def load_motion_file(path: str):
-    """Load the Holosoma/OmniRetarget trajectory format used by the replay script."""
+    """Load either raw Holosoma qpos or converted Holosoma RL motion."""
+
     path = Path(path)
 
     if not path.exists():
@@ -61,40 +62,191 @@ def load_motion_file(path: str):
     if path.suffix == ".npz":
         raw = np.load(path, allow_pickle=False)
         data = {k: raw[k] for k in raw.files}
+
     elif path.suffix == ".pkl":
         with open(path, "rb") as f:
             data = NumpyCompatUnpickler(f).load()
+
     else:
-        raise ValueError(f"Unsupported motion extension: {path.suffix}")
+        raise ValueError(
+            f"Unsupported motion extension: {path.suffix}"
+        )
 
-    if "qpos" not in data:
-        raise KeyError(f"Expected key 'qpos'. Found: {list(data.keys())}")
+    fps = float(
+        np.asarray(data.get("fps", 30.0)).reshape(-1)[0]
+    )
 
-    qpos = np.asarray(data["qpos"], dtype=np.float32)
-    if qpos.ndim != 2 or not np.isfinite(qpos).all():
-        raise ValueError(f"Bad qpos shape or values: {qpos.shape}")
+    if fps <= 0.0:
+        raise ValueError(f"Invalid motion fps: {fps}")
 
-    fps = float(np.asarray(data.get("fps", 30.0)).reshape(-1)[0])
+    # ------------------------------------------------------------------
+    # Converted Holosoma RL format
+    # ------------------------------------------------------------------
+    if "joint_pos" in data:
 
-    if qpos.shape[1] == 33:
-        root_qpos = qpos[:, 0:7]
-        robot_joint_qpos = qpos[:, 7:26]
-        object_qpos = qpos[:, 26:33]
-    elif qpos.shape[1] == 26:
-        root_qpos = qpos[:, 0:7]
-        robot_joint_qpos = qpos[:, 7:26]
-        object_qpos = None
-    elif qpos.shape[1] == 19:
-        root_qpos = None
-        robot_joint_qpos = qpos
-        object_qpos = None
+        joint_pos = np.asarray(
+            data["joint_pos"],
+            dtype=np.float32,
+        )
+
+        if (
+            joint_pos.ndim != 2
+            or not np.isfinite(joint_pos).all()
+        ):
+            raise ValueError(
+                f"Bad joint_pos shape or values: {joint_pos.shape}"
+            )
+
+        # H1 converted format:
+        # joint_pos =
+        # [root position (3),
+        #  root quaternion WXYZ (4),
+        #  H1 joints (19)]
+      
+        if joint_pos.shape[1] != 26:
+            raise ValueError(
+                "Expected converted H1 joint_pos with "
+                f"26 columns, got {joint_pos.shape[1]}"
+            )
+
+        root_qpos = joint_pos[:, 0:7]
+        robot_joint_qpos = joint_pos[:, 7:26]
+
+        if "joint_vel" in data:
+            joint_vel = np.asarray(
+                data["joint_vel"],
+                dtype=np.float32,
+            )
+
+            if joint_vel.shape != (joint_pos.shape[0], 25):
+                raise ValueError(
+                    f"Expected converted H1 joint_vel with shape "
+                    f"({joint_pos.shape[0]}, 25), got {joint_vel.shape}"
+                )
+
+            if not np.isfinite(joint_vel).all():
+                raise ValueError("joint_vel contains non-finite values.")
+
+            # Holosoma joint_vel:
+            # [root linear vel (3),
+            #  root angular vel (3),
+            #  H1 joint velocities (19)]
+            robot_joint_qvel = joint_vel[:, 6:25]
+
+        else:
+            robot_joint_qvel = None
+
+        # Converted Holosoma stores the object separately.
+        has_object_pos = "object_pos_w" in data
+        has_object_quat = "object_quat_w" in data
+
+        if has_object_pos != has_object_quat:
+            raise ValueError(
+                "Converted motion must contain both "
+                "'object_pos_w' and 'object_quat_w', or neither."
+            )
+
+        if has_object_pos:
+            object_pos = np.asarray(
+                data["object_pos_w"],
+                dtype=np.float32,
+            )
+
+            object_quat = np.asarray(
+                data["object_quat_w"],
+                dtype=np.float32,
+            )
+
+            if object_pos.shape != (joint_pos.shape[0], 3):
+                raise ValueError(
+                    f"Unexpected object_pos_w shape: "
+                    f"{object_pos.shape}"
+                )
+
+            if object_quat.shape != (joint_pos.shape[0], 4):
+                raise ValueError(
+                    f"Unexpected object_quat_w shape: "
+                    f"{object_quat.shape}"
+                )
+
+            if (
+                not np.isfinite(object_pos).all()
+                or not np.isfinite(object_quat).all()
+            ):
+                raise ValueError(
+                    "Object trajectory contains non-finite values."
+                )
+
+            # Reconstruct the format expected by desired_cube_pose_from_holosoma: [x, y, z, qw, qx, qy, qz]
+            object_qpos = np.concatenate(
+                (object_pos, object_quat),
+                axis=-1,
+            )
+
+        else:
+            object_qpos = None
+
+    
+
+    # ------------------------------------------------------------------
+    # Original/raw Holosoma retargeting format
+    # ------------------------------------------------------------------
+    elif "qpos" in data:
+
+        qpos = np.asarray(
+            data["qpos"],
+            dtype=np.float32,
+        )
+
+        robot_joint_qvel = None
+        if (
+            qpos.ndim != 2
+            or not np.isfinite(qpos).all()
+        ):
+            raise ValueError(
+                f"Bad qpos shape or values: {qpos.shape}"
+            )
+
+        if qpos.shape[1] == 33:
+            root_qpos = qpos[:, 0:7]
+            robot_joint_qpos = qpos[:, 7:26]
+            object_qpos = qpos[:, 26:33]
+
+        elif qpos.shape[1] == 26:
+            root_qpos = qpos[:, 0:7]
+            robot_joint_qpos = qpos[:, 7:26]
+            object_qpos = None
+
+        elif qpos.shape[1] == 19:
+            root_qpos = None
+            robot_joint_qpos = qpos
+            object_qpos = None
+
+        else:
+            raise ValueError(
+                f"Unexpected qpos dimension: {qpos.shape[1]}"
+            )
+
     else:
-        raise ValueError(f"Unexpected qpos dimension: {qpos.shape[1]}")
+        raise KeyError(
+            "Expected either 'qpos' (raw Holosoma) "
+            "or 'joint_pos' (converted Holosoma). "
+            f"Found: {list(data.keys())}"
+        )
 
     if robot_joint_qpos.shape[1] != 19:
-        raise ValueError(f"Expected 19 H1 joints, got {robot_joint_qpos.shape[1]}")
+        raise ValueError(
+            f"Expected 19 H1 joints, "
+            f"got {robot_joint_qpos.shape[1]}"
+        )
 
-    return robot_joint_qpos, fps, root_qpos, object_qpos
+    return (
+        robot_joint_qpos,
+        robot_joint_qvel,
+        fps,
+        root_qpos,
+        object_qpos,
+    )
 
 def _resample_linear(
     values: np.ndarray,
