@@ -291,6 +291,61 @@ class ObservationsCfg:
     
 @configclass
 class EventCfg:
+    """BeyondMimic-style randomization adapted to fixed-base H1."""
+
+    # --------------------------------------------------------------
+    # Startup domain randomization.
+    # --------------------------------------------------------------
+
+    physics_material = EventTerm(
+        func=base_mdp.randomize_rigid_body_material,
+        mode="startup",
+        params={
+            "asset_cfg": SceneEntityCfg(
+                "robot",
+                body_names=".*",
+            ),
+            "static_friction_range": (0.3, 1.6),
+            "dynamic_friction_range": (0.3, 1.2),
+            "restitution_range": (0.0, 0.5),
+            "num_buckets": 64,
+        },
+    )
+
+    add_joint_default_pos = EventTerm(
+        func=mdp.randomize_joint_default_pos,
+        mode="startup",
+        params={
+            "asset_cfg": SceneEntityCfg(
+                "robot",
+                joint_names=H1_TRACKING_JOINT_NAMES,
+                preserve_order=True,
+            ),
+            "pos_distribution_params": (-0.01, 0.01),
+            "operation": "add",
+        },
+    )
+
+    base_com = EventTerm(
+        func=base_mdp.randomize_rigid_body_com,
+        mode="startup",
+        params={
+            "asset_cfg": SceneEntityCfg(
+                "robot",
+                body_names="torso_link",
+            ),
+            "com_range": {
+                "x": (-0.025, 0.025),
+                "y": (-0.05, 0.05),
+                "z": (-0.05, 0.05),
+            },
+        },
+    )
+
+    # --------------------------------------------------------------
+    # Episode reset.
+    # --------------------------------------------------------------
+
     reset_to_reference = EventTerm(
         func=mdp.reset_to_motion_start,
         mode="reset",
@@ -298,7 +353,18 @@ class EventCfg:
             "command_name": "motion",
             "robot_name": "robot",
             "cube_name": "cube",
-            "use_reference_joint_velocity": False,
+
+            # BeyondMimic initializes qdot from the motion.
+            "use_reference_joint_velocity": True,
+
+            # BeyondMimic uses ±0.1 rad.
+            "joint_position_range": (-0.1, 0.1),
+
+            "tracking_asset_cfg": SceneEntityCfg(
+                "robot",
+                joint_names=H1_TRACKING_JOINT_NAMES,
+                preserve_order=True,
+            ),
         },
     )
 
@@ -380,20 +446,45 @@ class RewardsCfg:
 
 @configclass
 class TerminationsCfg:
-    # Reaching the end of a reference is a timeout-like natural end, not a failure.
+    """Tracking terminations adapted from BeyondMimic."""
+
+    # --------------------------------------------------------------
+    # Task-specific temporary ending.
+    #
+    # Keep this while we always start from frame 0.
+    # Remove it later if/when we implement trajectory-phase resampling.
+    # --------------------------------------------------------------
     motion_finished = DoneTerm(
         func=mdp.motion_finished,
         time_out=True,
-        params={"command_name": "motion"},
+        params={
+            "command_name": "motion",
+        },
     )
 
-    # Safety fallback only; the motion should normally terminate first.
-    time_out = DoneTerm(func=base_mdp.time_out, time_out=True)
+    # Hard environment fallback.
+    time_out = DoneTerm(
+        func=base_mdp.time_out,
+        time_out=True,
+    )
 
-    # Do NOT use a large-error termination initially: PPO needs to experience bad states
-    # while it is learning. We can enable this later if rollouts become pathological.
-
-
+    # --------------------------------------------------------------
+    # BeyondMimic-style tracking failure.
+    #
+    # Their terminal bodies are wrists/ankles. Our distal tracked
+    # upper-body references are the two elbows--> TO DO PUT VIRTUAL HANDS 
+    # --------------------------------------------------------------
+    ee_body_pos = DoneTerm(
+        func=mdp.bad_motion_body_pos_z_only,
+        params={
+            "command_name": "motion",
+            "threshold": 0.25,
+            "body_names": [
+                "left_elbow_link",
+                "right_elbow_link",
+            ],
+        },
+    )
 @configclass
 class SoftDiceTrackingEnvCfg(ManagerBasedRLEnvCfg):
     scene: SoftDiceSceneCfg = SoftDiceSceneCfg(num_envs=256, env_spacing=2.0, replicate_physics=False)

@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import torch
+import isaaclab.utils.math as math_utils
+
+from isaaclab.managers import SceneEntityCfg
 
 if TYPE_CHECKING:
+    from isaaclab.assets import Articulation
     from isaaclab.envs import ManagerBasedRLEnv
     from .motion_command import MotionCommand
-
 
 def _env_ids_tensor(env, env_ids):
     if env_ids is None:
@@ -28,7 +31,9 @@ def reset_to_motion_start(
     command_name: str = "motion",
     robot_name: str = "robot",
     cube_name: str = "cube",
-    use_reference_joint_velocity: bool = False,
+    use_reference_joint_velocity: bool = True,
+    joint_position_range: tuple[float, float] | None = None,
+    tracking_asset_cfg: SceneEntityCfg | None = None,
 ):
     """Reset root, joints, and the deformable dice to the demonstrated start state."""
 
@@ -55,7 +60,42 @@ def reset_to_motion_start(
     )
 
     joint_pos = motion.start_joint_pos(env_ids)
-    joint_vel = motion.start_joint_vel(env_ids) if use_reference_joint_velocity else torch.zeros_like(joint_pos)
+
+    joint_vel = (
+        motion.start_joint_vel(env_ids)
+        if use_reference_joint_velocity
+        else torch.zeros_like(joint_pos)
+    )
+
+    # BeyondMimic-style reset perturbation.
+    # Only perturb joints actually controlled by this policy.
+    if (
+        joint_position_range is not None
+        and tracking_asset_cfg is not None
+    ):
+        joint_ids = tracking_asset_cfg.joint_ids
+
+        tracked_joint_pos = joint_pos[:, joint_ids]
+
+        tracked_joint_pos += math_utils.sample_uniform(
+            joint_position_range[0],
+            joint_position_range[1],
+            tracked_joint_pos.shape,
+            joint_pos.device,
+        )
+
+        soft_limits = (
+            robot.data.soft_joint_pos_limits.torch[env_ids]
+            [:, joint_ids]
+        )
+
+        tracked_joint_pos = torch.clamp(
+            tracked_joint_pos,
+            min=soft_limits[..., 0],
+            max=soft_limits[..., 1],
+        )
+
+        joint_pos[:, joint_ids] = tracked_joint_pos
 
     robot.write_joint_position_to_sim_index(position=joint_pos, env_ids=env_ids)
     robot.write_joint_velocity_to_sim_index(velocity=joint_vel, env_ids=env_ids)
@@ -87,3 +127,66 @@ def reset_to_motion_start(
     nodal_targets[..., 3] = 1.0
     cube.write_nodal_kinematic_target_to_sim_index(nodal_targets, env_ids=env_ids)
     cube.reset(env_ids)
+
+def randomize_joint_default_pos(
+    env: ManagerBasedRLEnv,
+    env_ids: torch.Tensor | None,
+    asset_cfg: SceneEntityCfg,
+    pos_distribution_params: tuple[float, float] | None = None,
+    operation: Literal["add", "scale", "abs"] = "abs",
+    distribution: Literal["uniform", "log_uniform", "gaussian"] = "uniform",
+):
+    """Randomize joint default positions to model calibration offsets."""
+    from isaaclab.envs.mdp.events import _randomize_prop_by_op
+
+    asset: Articulation = env.scene[asset_cfg.name]
+
+    if env_ids is None:
+        env_ids = torch.arange(
+            env.scene.num_envs,
+            device=asset.device,
+            dtype=torch.long,
+        )
+
+    if asset_cfg.joint_ids == slice(None):
+        joint_ids = slice(None)
+    else:
+        joint_ids = torch.tensor(
+            asset_cfg.joint_ids,
+            dtype=torch.long,
+            device=asset.device,
+        )
+
+    if pos_distribution_params is None:
+        return
+
+    default_joint_pos = asset.data.default_joint_pos.torch
+
+    randomized = _randomize_prop_by_op(
+        default_joint_pos.clone(),
+        pos_distribution_params,
+        env_ids,
+        joint_ids,
+        operation=operation,
+        distribution=distribution,
+    )
+
+    if isinstance(joint_ids, slice):
+        default_joint_pos[env_ids] = randomized[env_ids]
+    else:
+        default_joint_pos[
+            env_ids[:, None],
+            joint_ids,
+        ] = randomized[
+            env_ids[:, None],
+            joint_ids,
+        ]
+
+    # JointPositionAction copied the default pose into its offset during
+    # construction. Synchronize that offset with the randomized defaults.
+    action_term = env.action_manager.get_term("joint_pos")
+
+    if isinstance(action_term._offset, torch.Tensor):
+        action_term._offset[env_ids] = default_joint_pos[
+            env_ids
+        ][:, action_term._joint_ids]

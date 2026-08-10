@@ -8,6 +8,7 @@ if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
     from .motion_command import MotionCommand
 
+from .motion_utils import H1_TRACKED_BODY_NAMES
 
 def motion_finished(
     env: ManagerBasedRLEnv,
@@ -29,13 +30,40 @@ def motion_finished(
     return finished
 
 
-def excessive_joint_tracking_error(
+def bad_motion_body_pos_z_only(
     env: ManagerBasedRLEnv,
-    command_name: str = "motion",
-    threshold: float = 1.0,
+    command_name: str,
+    threshold: float,
+    body_names: list[str] | None = None,
 ) -> torch.Tensor:
-    """End an episode when the joint tracking error exceeds a threshold"""
-    robot = env.scene["robot"]
-    motion: MotionCommand = env.command_manager.get_term(command_name)
-    error = torch.max(torch.abs(robot.data.joint_pos.torch - motion.joint_pos), dim=1).values
-    return error > threshold
+    """Terminate when selected tracked bodies deviate too far in z."""
+
+    motion: MotionCommand = env.command_manager.get_term(
+        command_name
+    )
+
+    body_pos_ref, _ = motion.aligned_body_reference()
+
+    if body_names is None:
+        body_indices = list(
+            range(len(H1_TRACKED_BODY_NAMES))
+        )
+    else:
+        body_indices = [
+            H1_TRACKED_BODY_NAMES.index(name)
+            for name in body_names
+        ]
+
+    error = torch.abs(
+        body_pos_ref[
+            :, body_indices, 2
+        ]
+        - motion.robot_body_pos[
+            :, body_indices, 2
+        ]
+    )
+
+    return torch.any(
+        error > threshold,
+        dim=-1,
+    )
