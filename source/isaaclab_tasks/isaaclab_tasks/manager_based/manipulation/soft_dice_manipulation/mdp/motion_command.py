@@ -127,7 +127,6 @@ class MotionCommand(CommandTerm):
             self._body_lin_vel_all = None
             self._body_ang_vel_all = None
 
-        _all.abs().max().item(),
 
         reorder_idx = np.asarray(
             HOLOSOMA_TO_ISAAC_INDICES,
