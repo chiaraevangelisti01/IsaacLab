@@ -32,6 +32,14 @@ HOLOSOMA_H1_JOINT_NAMES = [
 
 HOLOSOMA_TO_ISAAC_INDICES = [0, 5, 10, 1, 6, 11, 15, 2, 7, 12, 16, 3, 8, 13, 17, 4, 9, 14, 18]
 
+H1_TRACKED_BODY_NAMES = [
+    "torso_link",
+    "left_shoulder_roll_link",
+    "left_elbow_link",
+    "right_shoulder_roll_link",
+    "right_elbow_link",
+]
+
 _REPO_ROOT = Path(ISAACLAB_TASKS_EXT_DIR).resolve().parents[1]
 _MODELS_PATH = _REPO_ROOT / "scripts" / "soft_dice_environment" / "models"
 CUSTOM_DICE_DEFORMABLE_USD = str(_MODELS_PATH / "dice_superquadric_deformable_two_meshes.usd")
@@ -50,6 +58,72 @@ def validate_asset_paths() -> None:
     if not path.is_file():
         raise FileNotFoundError(f"Required deformable dice asset does not exist: {path}")
 
+def load_body_reference(data: dict, num_frames: int):
+    """Load Cartesian body reference from converted Holosoma data."""
+
+    required_keys = {
+        "body_names",
+        "body_pos_w",
+        "body_quat_w",
+    }
+
+    present_keys = required_keys.intersection(data.keys())
+
+    if not present_keys:
+        return None, None, None
+
+    if present_keys != required_keys:
+        missing = required_keys - present_keys
+        raise ValueError(
+            f"Incomplete Cartesian body reference. Missing: {missing}"
+        )
+
+    body_names = [
+        name.decode() if isinstance(name, bytes) else str(name)
+        for name in np.asarray(data["body_names"]).reshape(-1)
+    ]
+
+    body_pos_w = np.asarray(
+        data["body_pos_w"],
+        dtype=np.float32,
+    )
+
+    body_quat_w = np.asarray(
+        data["body_quat_w"],
+        dtype=np.float32,
+    )
+
+    expected_pos_shape = (
+        num_frames,
+        len(body_names),
+        3,
+    )
+
+    expected_quat_shape = (
+        num_frames,
+        len(body_names),
+        4,
+    )
+
+    if body_pos_w.shape != expected_pos_shape:
+        raise ValueError(
+            f"Expected body_pos_w shape {expected_pos_shape}, "
+            f"got {body_pos_w.shape}"
+        )
+
+    if body_quat_w.shape != expected_quat_shape:
+        raise ValueError(
+            f"Expected body_quat_w shape {expected_quat_shape}, "
+            f"got {body_quat_w.shape}"
+        )
+
+    if not np.isfinite(body_pos_w).all():
+        raise ValueError("body_pos_w contains non-finite values.")
+
+    if not np.isfinite(body_quat_w).all():
+        raise ValueError("body_quat_w contains non-finite values.")
+
+    return body_names, body_pos_w, body_quat_w
 
 def load_motion_file(path: str):
     """Load either raw Holosoma qpos or converted Holosoma RL motion."""
@@ -79,6 +153,10 @@ def load_motion_file(path: str):
     if fps <= 0.0:
         raise ValueError(f"Invalid motion fps: {fps}")
 
+    body_names = None
+    body_pos_w = None
+    body_quat_w = None
+    robot_joint_qvel = None
     # ------------------------------------------------------------------
     # Converted Holosoma RL format
     # ------------------------------------------------------------------
@@ -111,6 +189,15 @@ def load_motion_file(path: str):
 
         root_qpos = joint_pos[:, 0:7]
         robot_joint_qpos = joint_pos[:, 7:26]
+
+        (
+            body_names,
+            body_pos_w,
+            body_quat_w,
+        ) = load_body_reference(
+            data=data,
+            num_frames=joint_pos.shape[0],
+        )
 
         if "joint_vel" in data:
             joint_vel = np.asarray(
@@ -198,7 +285,7 @@ def load_motion_file(path: str):
             dtype=np.float32,
         )
 
-        robot_joint_qvel = None
+        
         if (
             qpos.ndim != 2
             or not np.isfinite(qpos).all()
@@ -246,6 +333,9 @@ def load_motion_file(path: str):
         fps,
         root_qpos,
         object_qpos,
+        body_names,
+        body_pos_w,
+        body_quat_w,
     )
 
 def _resample_linear(
@@ -525,3 +615,103 @@ def desired_cube_pose_from_holosoma(
     dice_rel_root_local = R_holo_root.T @ (dice_pos - root_pos)
 
     return pos, quat_xyzw, dice_rel_root_local.astype(np.float32), root_pos, dice_pos
+
+def select_body_reference(
+    body_names: list[str],
+    body_pos_w: np.ndarray,
+    body_quat_w: np.ndarray,
+    tracked_body_names: list[str],
+):
+    """Select Cartesian trajectories for requested bodies."""
+
+    body_indices = []
+
+    for name in tracked_body_names:
+        if name not in body_names:
+            raise ValueError(
+                f"Body '{name}' not found in Holosoma trajectory. "
+                f"Available bodies: {body_names}"
+            )
+
+        body_indices.append(
+            body_names.index(name)
+        )
+
+    return (
+        body_pos_w[:, body_indices, :],
+        body_quat_w[:, body_indices, :],
+    )
+
+def transform_body_reference_to_fixed_root(
+    body_pos_w: np.ndarray,
+    body_quat_w: np.ndarray,
+    root_qpos: np.ndarray,
+    fixed_root_pos: np.ndarray,
+    fixed_root_quat_xyzw: np.ndarray,
+):
+    """Express floating-root Holosoma body poses under a fixed Isaac root."""
+
+    num_frames = body_pos_w.shape[0]
+    num_bodies = body_pos_w.shape[1]
+
+    out_pos = np.empty_like(
+        body_pos_w,
+        dtype=np.float32,
+    )
+
+    out_quat = np.empty(
+        (num_frames, num_bodies, 4),
+        dtype=np.float32,
+    )
+
+    fixed_root_pos = np.asarray(
+        fixed_root_pos,
+        dtype=np.float32,
+    )
+
+    R_fixed_root = _quat_xyzw_to_rotmat(
+        fixed_root_quat_xyzw
+    )
+
+    for frame in range(num_frames):
+
+        root_pos = root_qpos[frame, :3]
+
+        R_root = _quat_wxyz_to_rotmat(
+            root_qpos[frame, 3:7]
+        )
+
+        for body in range(num_bodies):
+
+            # Position of body expressed relative to floating root.
+            body_pos_root = (
+                R_root.T
+                @ (
+                    body_pos_w[frame, body]
+                    - root_pos
+                )
+            )
+
+            # Orientation of body relative to floating root.
+            R_body = _quat_wxyz_to_rotmat(
+                body_quat_w[frame, body]
+            )
+
+            R_body_root = (
+                R_root.T
+                @ R_body
+            )
+
+            # Put the root-relative pose under the fixed Isaac root.
+            out_pos[frame, body] = (
+                fixed_root_pos
+                + R_fixed_root @ body_pos_root
+            )
+
+            out_quat[frame, body] = (
+                _rotmat_to_quat_xyzw(
+                    R_fixed_root @ R_body_root
+                )
+            )
+
+    return out_pos, out_quat

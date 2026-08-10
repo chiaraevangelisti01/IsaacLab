@@ -278,7 +278,7 @@ class SoftDiceTrackingEnvCfg(ManagerBasedRLEnvCfg):
                 "env.commands.motion.motion_file=/absolute/path/to/demo.npz"
             )
 
-        _, _, fps, root_qpos, object_qpos = load_motion_file(motion_file)
+        _, _, fps, root_qpos, object_qpos, _,_,_, = load_motion_file(motion_file)
 
         if root_qpos is None or object_qpos is None:
             raise ValueError(

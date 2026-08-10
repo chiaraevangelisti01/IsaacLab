@@ -12,10 +12,13 @@ from isaaclab.utils.configclass import configclass
 
 
 from .motion_utils import (
+    H1_TRACKED_BODY_NAMES,
     HOLOSOMA_TO_ISAAC_INDICES,
     desired_cube_pose_from_holosoma,
     load_motion_file,
     resample_motion_to_fps,
+    select_body_reference,
+    transform_body_reference_to_fixed_root,
 )
 
 if TYPE_CHECKING:
@@ -40,8 +43,30 @@ class MotionCommand(CommandTerm):
         self.robot = env.scene[cfg.asset_name]
         self.cube = env.scene[cfg.cube_name]
 
-        joint_qpos_np, joint_qvel_np, source_fps, root_qpos_np, object_qpos_np = load_motion_file(
-            cfg.motion_file
+        (
+            joint_qpos_np,
+            joint_qvel_np,
+            source_fps,
+            root_qpos_np,
+            object_qpos_np,
+            body_names,
+            body_pos_w_np,
+            body_quat_w_np,
+        ) = load_motion_file(cfg.motion_file)
+
+        (
+            self._tracked_body_ids,
+            self._body_pos_all,
+            self._body_quat_all,
+        ) = self._prepare_body_reference(
+            body_names=body_names,
+            body_pos_w=body_pos_w_np,
+            body_quat_w=body_quat_w_np,
+            root_qpos=root_qpos_np,
+        )
+
+        self.has_body_reference = (
+            self._body_pos_all is not None
         )
 
         self.source_motion_fps = float(source_fps)
@@ -58,6 +83,12 @@ class MotionCommand(CommandTerm):
 
         need_resampling = not np.isclose(self.motion_fps, self.source_motion_fps, rtol = 0.0, atol = 1.0e-6)
 
+        if body_pos_w_np is not None and need_resampling:
+            raise ValueError(
+                "Converted Cartesian body references must currently "
+                "already match the environment control frequency."
+            )
+
         if need_resampling:
 
             (
@@ -71,6 +102,7 @@ class MotionCommand(CommandTerm):
                 root_qpos=root_qpos_np,
                 object_qpos=object_qpos_np,
             )
+
 
         reorder_idx = np.asarray(
             HOLOSOMA_TO_ISAAC_INDICES,
@@ -190,6 +222,86 @@ class MotionCommand(CommandTerm):
         self._metric_step_count = torch.zeros(
             self.num_envs, dtype=torch.float32, device=self.device
         )
+
+    def _prepare_body_reference(
+            self,
+            body_names,
+            body_pos_w,
+            body_quat_w,
+            root_qpos,
+        ):
+            """Prepare Holosoma Cartesian references for the fixed-base Isaac H1."""
+
+            if (
+                body_names is None
+                or body_pos_w is None
+                or body_quat_w is None
+            ):
+                return None, None, None
+
+            if root_qpos is None:
+                raise ValueError(
+                    "Cartesian body reference requires a root trajectory."
+                )
+
+            body_pos_w, body_quat_w = select_body_reference(
+                body_names=body_names,
+                body_pos_w=body_pos_w,
+                body_quat_w=body_quat_w,
+                tracked_body_names=H1_TRACKED_BODY_NAMES,
+            )
+
+            isaac_body_ids, isaac_body_names = self.robot.find_bodies(
+                H1_TRACKED_BODY_NAMES,
+                preserve_order=True,
+            )
+
+            if list(isaac_body_names) != H1_TRACKED_BODY_NAMES:
+                raise ValueError(
+                    f"Isaac body order mismatch. "
+                    f"Expected {H1_TRACKED_BODY_NAMES}, "
+                    f"got {isaac_body_names}"
+                )
+
+            body_pos_ref, body_quat_ref = (
+                transform_body_reference_to_fixed_root(
+                    body_pos_w=body_pos_w,
+                    body_quat_w=body_quat_w,
+                    root_qpos=root_qpos,
+                    fixed_root_pos=np.asarray(
+                        self.robot.cfg.init_state.pos,
+                        dtype=np.float32,
+                    ),
+                    fixed_root_quat_xyzw=np.asarray(
+                        self.robot.cfg.init_state.rot,
+                        dtype=np.float32,
+                    ),
+                )
+            )
+
+            body_ids = torch.as_tensor(
+                isaac_body_ids,
+                dtype=torch.long,
+                device=self.device,
+            )
+
+            body_pos_ref = torch.as_tensor(
+                body_pos_ref,
+                dtype=torch.float32,
+                device=self.device,
+            )
+
+            body_quat_ref = torch.as_tensor(
+                body_quat_ref,
+                dtype=torch.float32,
+                device=self.device,
+            )
+
+            return (
+                body_ids,
+                body_pos_ref,
+                body_quat_ref,
+            )
 
     @staticmethod
     def _differentiate(q: np.ndarray, fps: float) -> np.ndarray:
