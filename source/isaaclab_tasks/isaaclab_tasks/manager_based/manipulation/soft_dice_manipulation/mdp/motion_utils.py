@@ -40,6 +40,22 @@ H1_TRACKED_BODY_NAMES = [
     "right_elbow_link",
 ]
 
+H1_HAND_REFERENCE_NAMES = [
+    "left_hand_link",
+    "right_hand_link",
+]
+
+H1_HAND_PARENT_BODY_NAMES = [
+    "left_elbow_link",
+    "right_elbow_link",
+]
+
+
+H1_HAND_OFFSETS_B = [
+    [0.28, 0.0005, -0.0185],
+    [0.28, -0.0005, -0.0185],
+]
+
 _REPO_ROOT = Path(ISAACLAB_TASKS_EXT_DIR).resolve().parents[1]
 _MODELS_PATH = _REPO_ROOT / "scripts" / "soft_dice_environment" / "models"
 CUSTOM_DICE_DEFORMABLE_USD = str(_MODELS_PATH / "dice_superquadric_reduced_resolution.usd")

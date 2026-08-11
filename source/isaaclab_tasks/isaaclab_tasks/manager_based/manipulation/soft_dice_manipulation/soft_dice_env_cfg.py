@@ -426,6 +426,7 @@ class RewardsCfg:
         params={
             "command_name": "motion",
             "std": 0.3,
+            "include_hands": True,
         },
     )
 

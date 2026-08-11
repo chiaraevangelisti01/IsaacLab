@@ -19,6 +19,9 @@ from isaaclab.utils.math import (
 )
 
 from .motion_utils import (
+    H1_HAND_OFFSETS_B,
+    H1_HAND_PARENT_BODY_NAMES,
+    H1_HAND_REFERENCE_NAMES,
     H1_TRACKED_BODY_NAMES,
     HOLOSOMA_TO_ISAAC_INDICES,
     desired_cube_pose_from_holosoma,
@@ -76,6 +79,40 @@ class MotionCommand(CommandTerm):
             self._body_pos_all is not None
         )
 
+        self._hand_pos_all = self._prepare_hand_position_reference(
+            body_names=body_names,
+            body_pos_w=body_pos_w_np,
+            body_quat_w=body_quat_w_np,
+            root_qpos=root_qpos_np,
+        )
+
+        self.has_hand_reference = (
+            self._hand_pos_all is not None
+        )
+
+        hand_parent_ids, hand_parent_names = self.robot.find_bodies(
+            H1_HAND_PARENT_BODY_NAMES,
+            preserve_order=True,
+        )
+
+        if list(hand_parent_names) != H1_HAND_PARENT_BODY_NAMES:
+            raise ValueError(
+                "Isaac hand-parent body order mismatch. "
+                f"Expected {H1_HAND_PARENT_BODY_NAMES}, "
+                f"got {hand_parent_names}"
+            )
+
+        self._hand_parent_body_ids = torch.as_tensor(
+            hand_parent_ids,
+            dtype=torch.long,
+            device=self.device,
+        )
+
+        self._hand_offsets_b = torch.tensor(
+            H1_HAND_OFFSETS_B,
+            dtype=torch.float32,
+            device=self.device,
+        )
         self.source_motion_fps = float(source_fps)
 
         source_num_frames = int(joint_qpos_np.shape[0])
@@ -326,6 +363,55 @@ class MotionCommand(CommandTerm):
                 body_pos_ref,
                 body_quat_ref,
             )
+
+    def _prepare_hand_position_reference(
+        self,
+        body_names,
+        body_pos_w,
+        body_quat_w,
+        root_qpos,
+    ):
+        """Prepare virtual-hand position references for fixed-base Isaac H1."""
+
+        if (
+            body_names is None
+            or body_pos_w is None
+            or body_quat_w is None
+        ):
+            return None
+
+        if root_qpos is None:
+            raise ValueError(
+                "Cartesian hand reference requires a root trajectory."
+            )
+
+        # Hands already exist as bodies in the converted Holosoma trajectory.
+        hand_pos_w, hand_quat_w = select_body_reference(
+            body_names=body_names,
+            body_pos_w=body_pos_w,
+            body_quat_w=body_quat_w,
+            tracked_body_names=H1_HAND_REFERENCE_NAMES,
+        )
+
+        hand_pos_ref, _ = transform_body_reference_to_fixed_root(
+            body_pos_w=hand_pos_w,
+            body_quat_w=hand_quat_w,
+            root_qpos=root_qpos,
+            fixed_root_pos=np.asarray(
+                self.robot.cfg.init_state.pos,
+                dtype=np.float32,
+            ),
+            fixed_root_quat_xyzw=np.asarray(
+                self.robot.cfg.init_state.rot,
+                dtype=np.float32,
+            ),
+        )
+
+        return torch.as_tensor(
+            hand_pos_ref,
+            dtype=torch.float32,
+            device=self.device,
+        )
     
     def aligned_body_reference(
         self,
@@ -401,6 +487,57 @@ class MotionCommand(CommandTerm):
         )
 
         return body_pos_aligned, body_quat_aligned
+
+    def aligned_hand_reference(
+        self,
+    ) -> torch.Tensor:
+        """Align virtual-hand references to the current torso yaw."""
+
+        hand_pos_ref = self.hand_pos
+
+        torso_index = H1_TRACKED_BODY_NAMES.index(
+            "torso_link"
+        )
+
+        torso_pos_ref = self.body_pos[
+            :, torso_index, :
+        ]
+
+        torso_quat_ref = self.body_quat[
+            :, torso_index, :
+        ]
+
+        torso_quat_robot = self.robot_body_quat[
+            :, torso_index, :
+        ]
+
+        delta_yaw = yaw_quat(
+            quat_mul(
+                torso_quat_robot,
+                quat_inv(torso_quat_ref),
+            )
+        )
+
+        delta_yaw_hands = delta_yaw[
+            :, None, :
+        ].expand(
+            -1,
+            len(H1_HAND_REFERENCE_NAMES),
+            -1,
+        )
+
+        hand_pos_from_torso = (
+            hand_pos_ref
+            - torso_pos_ref[:, None, :]
+        )
+
+        return (
+            torso_pos_ref[:, None, :]
+            + quat_apply(
+                delta_yaw_hands,
+                hand_pos_from_torso,
+            )
+        )
 
     @staticmethod
     def _differentiate(
@@ -599,7 +736,51 @@ class MotionCommand(CommandTerm):
         return self.robot.data.body_link_pose_w.torch[
             :, self._tracked_body_ids, 3:7
         ]
+    @property
+    def hand_pos(self) -> torch.Tensor:
+        """Current fixed-root virtual-hand position reference."""
 
+        if self._hand_pos_all is None:
+            raise RuntimeError(
+                "Motion does not contain hand references."
+            )
+
+        return self._hand_pos_all[self._frame_idx]
+
+    @property
+    def robot_hand_pos(self) -> torch.Tensor:
+        """Current virtual-hand positions on the simulated H1."""
+
+        parent_pose_w = self.robot.data.body_link_pose_w.torch[
+            :, self._hand_parent_body_ids, :
+        ]
+
+        parent_pos_w = parent_pose_w[..., :3]
+        parent_quat_w = parent_pose_w[..., 3:7]
+
+        offsets_b = self._hand_offsets_b[
+            None, :, :
+        ].expand(
+            parent_pos_w.shape[0],
+            -1,
+            -1,
+        )
+
+        offsets_w = quat_apply(
+            parent_quat_w,
+            offsets_b,
+        )
+
+        hand_pos_w = (
+            parent_pos_w
+            + offsets_w
+        )
+
+        return (
+            hand_pos_w
+            - self._env.scene.env_origins[:, None, :]
+        )
+    
     @property
     def body_lin_vel(self) -> torch.Tensor:
         """Current fixed-root Cartesian body linear-velocity reference."""

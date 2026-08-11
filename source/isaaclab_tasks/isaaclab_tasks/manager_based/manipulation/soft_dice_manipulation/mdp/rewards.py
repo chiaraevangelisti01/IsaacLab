@@ -40,31 +40,59 @@ def motion_global_anchor_orientation_error_exp(
 
 
 def motion_relative_body_position_error_exp(
-    env: ManagerBasedRLEnv,
-    command_name: str,
-    std: float,
-) -> torch.Tensor:
-    """Track yaw-aligned Cartesian body positions."""
+        env: ManagerBasedRLEnv,
+        command_name: str,
+        std: float,
+        include_hands: bool = False,
+    ) -> torch.Tensor:
+        """Track yaw-aligned Cartesian body positions."""
 
-    motion: MotionCommand = env.command_manager.get_term(
-        command_name
-    )
+        motion: MotionCommand = env.command_manager.get_term(
+            command_name
+        )
 
-    body_pos_ref, _ = motion.aligned_body_reference()
+        body_pos_ref, _ = motion.aligned_body_reference()
 
-    error = torch.sum(
-        torch.square(
-            body_pos_ref
-            - motion.robot_body_pos
-        ),
-        dim=-1,
-    )
+        body_error = torch.sum(
+            torch.square(
+                body_pos_ref
+                - motion.robot_body_pos
+            ),
+            dim=-1,
+        )
 
-    return torch.exp(
-        -torch.mean(error, dim=-1)
-        / (std * std)
-    )
+        if include_hands:
+            if not motion.has_hand_reference:
+                raise RuntimeError(
+                    "Hand tracking requested, but the motion "
+                    "does not contain hand references."
+                )
 
+            hand_pos_ref = motion.aligned_hand_reference()
+
+            hand_error = torch.sum(
+                torch.square(
+                    hand_pos_ref
+                    - motion.robot_hand_pos
+                ),
+                dim=-1,
+            )
+
+            error = torch.cat(
+                (
+                    body_error,
+                    hand_error,
+                ),
+                dim=-1,
+            )
+
+        else:
+            error = body_error
+
+        return torch.exp(
+            -torch.mean(error, dim=-1)
+            / (std * std)
+        )
 
 def motion_relative_body_orientation_error_exp(
     env: ManagerBasedRLEnv,
