@@ -18,7 +18,6 @@ from isaaclab.utils.noise import UniformNoiseCfg as Unoise
 from isaaclab_assets.robots.unitree_h1_aist import H1_FIXED_CFG
 from isaaclab_physx.physics import PhysxCfg
 from isaaclab_physx.sim import PhysxDeformableBodyMaterialCfg
-
 from . import mdp
 from .mdp.motion_utils import (
     CUSTOM_DICE_DEFORMABLE_USD,
@@ -52,12 +51,21 @@ H1_TRACKING_ACTION_SCALE = mdp.build_joint_action_scale(
     scale_factor=0.25,
 )
 
-def make_deformable_cube_cfg(prim_path: str) -> DeformableObjectCfg:
+
+def make_deformable_cube_cfg(
+    prim_path: str,
+) -> DeformableObjectCfg:
     return DeformableObjectCfg(
         prim_path=prim_path,
         spawn=sim_utils.UsdFileCfg(
             usd_path=CUSTOM_DICE_DEFORMABLE_USD,
             scale=CUSTOM_DICE_SCALE,
+
+            collision_props=sim_utils.CollisionPropertiesCfg(
+                rest_offset=0.001,
+                contact_offset=0.005,
+            ),
+
             physics_material=PhysxDeformableBodyMaterialCfg(
                 density=21.5,
                 poissons_ratio=0.37,
@@ -66,9 +74,14 @@ def make_deformable_cube_cfg(prim_path: str) -> DeformableObjectCfg:
                 dynamic_friction=0.8,
                 elasticity_damping=0.02,
             ),
-            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.8, 0.1, 0.1)),
+
+            visual_material=sim_utils.PreviewSurfaceCfg(
+                diffuse_color=(0.8, 0.1, 0.1)
+            ),
         ),
-        init_state=DeformableObjectCfg.InitialStateCfg(pos=(-0.15, 0.0, 1.01)),
+        init_state=DeformableObjectCfg.InitialStateCfg(
+            pos=(-0.15, 0.0, 1.01)
+        ),
         debug_vis=False,
     )
 
@@ -94,8 +107,8 @@ class SoftDiceSceneCfg(InteractiveSceneCfg):
         spawn=sim_utils.CuboidCfg(
             size=(DEFAULT_TABLE_LENGTH, DEFAULT_TABLE_WIDTH, 0.80),
             collision_props=sim_utils.CollisionPropertiesCfg(
-                contact_offset=0.008,
-                rest_offset=0.002,
+                contact_offset=0.004,
+                rest_offset=0.001,
             ),
             visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.35, 0.35, 0.35)),
             physics_material=sim_utils.RigidBodyMaterialCfg(
@@ -368,6 +381,25 @@ class EventCfg:
         },
     )
 
+    filter_lower_body_self_collisions = EventTerm(
+        func=mdp.filter_lower_body_self_collisions,
+        mode="prestartup",
+        params={
+            "lower_body_names": [
+                "left_hip_yaw_link",
+                "left_hip_roll_link",
+                "left_hip_pitch_link",
+                "left_knee_link",
+                "left_ankle_link",
+                "right_hip_yaw_link",
+                "right_hip_roll_link",
+                "right_hip_pitch_link",
+                "right_knee_link",
+                "right_ankle_link",
+            ],
+        },
+    )
+
 
 @configclass
 class RewardsCfg:
@@ -509,10 +541,10 @@ class SoftDiceTrackingEnvCfg(ManagerBasedRLEnvCfg):
         self.sim.render_interval = self.decimation
         self.sim.physics = PhysxCfg(
             solver_type=1,
-            min_position_iteration_count=32,
-            max_position_iteration_count=96,
-            min_velocity_iteration_count=4,
-            max_velocity_iteration_count=16,
+            min_position_iteration_count=8,
+            max_position_iteration_count=64,
+            min_velocity_iteration_count=1,
+            max_velocity_iteration_count=4,
             bounce_threshold_velocity=0.2,
         )
 

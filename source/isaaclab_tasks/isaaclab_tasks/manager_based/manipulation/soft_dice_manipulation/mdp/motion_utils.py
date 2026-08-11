@@ -42,7 +42,7 @@ H1_TRACKED_BODY_NAMES = [
 
 _REPO_ROOT = Path(ISAACLAB_TASKS_EXT_DIR).resolve().parents[1]
 _MODELS_PATH = _REPO_ROOT / "scripts" / "soft_dice_environment" / "models"
-CUSTOM_DICE_DEFORMABLE_USD = str(_MODELS_PATH / "dice_superquadric_deformable_two_meshes.usd")
+CUSTOM_DICE_DEFORMABLE_USD = str(_MODELS_PATH / "dice_superquadric_reduced_resolution.usd")
 CUSTOM_DICE_SCALE = (1.0, 1.0, 1.0)
 
 

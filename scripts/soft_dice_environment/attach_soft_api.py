@@ -87,13 +87,12 @@ from pxr import UsdPhysics
 # -----------------------------------------------------------------------------
 
 INPUT_USD = (
-    "/home/chiara/git/IsaacLab_v3_test/"
-    "dice_superquadric_clean_simplified.usd"
+    "/home/chiara/git/IsaacLab_v3_test/scripts/soft_dice_environment/models/dice_superquadric_clean_simplified.usd"
 )
 
 OUTPUT_USD = (
     "/home/chiara/git/IsaacLab_v3_test/"
-    "dice_superquadric_deformable_two_meshes.usd"
+    "dice_superquadric_reduced_resolution.usd"
 )
 
 
@@ -1683,16 +1682,29 @@ def main():
             "returned False."
         )
 
-    # ------------------------------------------------------------------
-    # Verify roles before cooking.
-    # Generated arrays may already be populated by the helper, but this
-    # pre-cook check concentrates on schemas and collider count.
-    # ------------------------------------------------------------------
-
+    SIMULATION_HEX_RESOLUTION = 8
     root_prim = require_valid_prim(
         stage,
         ROOT_PATH,
     )
+
+    resolution_attr = root_prim.GetAttribute(
+        "physxDeformableBody:resolution"
+    )
+
+    if not resolution_attr:
+        raise RuntimeError(
+            "Missing physxDeformableBody:resolution."
+        )
+
+    success = resolution_attr.Set(
+        SIMULATION_HEX_RESOLUTION
+    )
+
+    if not success:
+        raise RuntimeError(
+            "Could not author physxDeformableBody:resolution."
+        )
 
     verify_auto_generation_root(
         root_prim

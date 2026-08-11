@@ -190,3 +190,65 @@ def randomize_joint_default_pos(
         action_term._offset[env_ids] = default_joint_pos[
             env_ids
         ][:, action_term._joint_ids]
+
+def filter_lower_body_self_collisions(
+    env,
+    env_ids,
+    lower_body_names: list[str],
+    robot_prim_name: str = "Robot",
+):
+    """Disable self-collision pairs involving the H1 lower body."""
+
+    from pxr import Usd, UsdPhysics
+
+    stage = env.sim.stage
+
+    for env_path in env.scene.env_prim_paths:
+        robot_path = f"{env_path}/{robot_prim_name}"
+        robot_prim = stage.GetPrimAtPath(robot_path)
+
+        if not robot_prim.IsValid():
+            raise RuntimeError(
+                f"Robot prim not found: {robot_path}"
+            )
+
+        # Find actual rigid-body link prims.
+        rigid_bodies = {}
+
+        for prim in Usd.PrimRange(robot_prim):
+            if prim.HasAPI(UsdPhysics.RigidBodyAPI):
+                rigid_bodies[prim.GetName()] = prim
+
+        for lower_name in lower_body_names:
+            if lower_name not in rigid_bodies:
+                raise RuntimeError(
+                    f"Rigid body not found: {lower_name}. "
+                    f"Available: {list(rigid_bodies)}"
+                )
+
+            lower_prim = rigid_bodies[lower_name]
+
+            # Important sanity check.
+            if lower_prim.IsInstanceProxy():
+                raise RuntimeError(
+                    f"{lower_prim.GetPath()} is itself an "
+                    "instance proxy."
+                )
+
+            filter_api = UsdPhysics.FilteredPairsAPI.Apply(
+                lower_prim
+            )
+
+            filtered_pairs = (
+                filter_api.CreateFilteredPairsRel()
+            )
+
+            # Filter this lower-body link against every other
+            # rigid body belonging to the robot.
+            for other_prim in rigid_bodies.values():
+                if other_prim == lower_prim:
+                    continue
+
+                filtered_pairs.AddTarget(
+                    other_prim.GetPath()
+                )
