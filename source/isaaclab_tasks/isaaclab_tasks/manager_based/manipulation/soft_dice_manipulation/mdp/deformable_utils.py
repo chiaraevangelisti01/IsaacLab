@@ -46,16 +46,52 @@ def estimate_deformable_orientation_kabsch(
         @ current_centered
     )
 
-    u, _, vh = torch.linalg.svd(covariance)
+    # u, _, vh = torch.linalg.svd(covariance)
+
+    # v = vh.transpose(-1, -2)
+    # u_t = u.transpose(-1, -2)
+
+    # # Kabsch reflection correction: enforce R in SO(3), det(R) = +1.
+    # correction = torch.ones(
+    #     (*covariance.shape[:-2], 3),
+    #     dtype=covariance.dtype,
+    #     device=covariance.device,
+    # )
+
+    # correction[..., -1] = torch.where(
+    #     torch.det(v @ u_t) < 0.0,
+    #     -1.0,
+    #     1.0,
+    # )
+
+    # rotation = (
+    #     v
+    #     @ torch.diag_embed(correction)
+    #     @ u_t
+    # )
+
+    # return quat_unique(
+    #     quat_from_matrix(rotation)
+    # )
+
+    covariance = (
+        reference_centered.transpose(-1, -2)
+        @ current_centered
+    )
+
+    covariance_svd = covariance.to(torch.float64)
+
+    u, singular_values, vh = torch.linalg.svd(
+        covariance_svd
+    )
 
     v = vh.transpose(-1, -2)
     u_t = u.transpose(-1, -2)
 
-    # Kabsch reflection correction: enforce R in SO(3), det(R) = +1.
     correction = torch.ones(
-        (*covariance.shape[:-2], 3),
-        dtype=covariance.dtype,
-        device=covariance.device,
+        (*covariance_svd.shape[:-2], 3),
+        dtype=covariance_svd.dtype,
+        device=covariance_svd.device,
     )
 
     correction[..., -1] = torch.where(
@@ -72,4 +108,4 @@ def estimate_deformable_orientation_kabsch(
 
     return quat_unique(
         quat_from_matrix(rotation)
-    )
+    ).to(reference_nodal_pos.dtype)
