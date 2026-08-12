@@ -167,4 +167,48 @@ def motion_global_body_angular_velocity_error_exp(
         / (std * std)
     )
 
+def object_global_ref_position_error_exp(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    std: float,
+) -> torch.Tensor:
+    """Track the demonstrated deformable-dice position."""
+
+    motion: MotionCommand = env.command_manager.get_term(
+        command_name
+    )
+
+    error = torch.sum(
+        torch.square(
+            motion.cube_pos
+            - motion.simulator_cube_pos
+        ),
+        dim=-1,
+    )
+
+    return torch.exp(
+        -error / (std * std)
+    )
+
+
+def object_global_ref_orientation_error_exp(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    std: float,
+) -> torch.Tensor:
+    """Track the demonstrated deformable-dice bulk orientation."""
+
+    motion: MotionCommand = env.command_manager.get_term(
+        command_name
+    )
+
+    error = quat_error_magnitude(
+        motion.cube_quat,
+        motion.simulator_cube_quat,
+    ) ** 2
+
+    return torch.exp(
+        -error / (std * std)
+    )
+
 

@@ -10,6 +10,8 @@ if TYPE_CHECKING:
 
 from .motion_utils import H1_TRACKED_BODY_NAMES
 
+from isaaclab.utils.math import quat_error_magnitude
+
 def motion_finished(
     env: ManagerBasedRLEnv,
     command_name: str = "motion",
@@ -35,35 +37,81 @@ def bad_motion_body_pos_z_only(
     command_name: str,
     threshold: float,
     body_names: list[str] | None = None,
+    include_hands: bool = False,
 ) -> torch.Tensor:
-    """Terminate when selected tracked bodies deviate too far in z."""
 
     motion: MotionCommand = env.command_manager.get_term(
         command_name
     )
 
-    body_pos_ref, _ = motion.aligned_body_reference()
+    if include_hands:
+        if not motion.has_hand_reference:
+            raise RuntimeError(
+                "Hand tracking termination requested, but the motion "
+                "does not contain hand references."
+            )
 
-    if body_names is None:
-        body_indices = list(
-            range(len(H1_TRACKED_BODY_NAMES))
+        hand_pos_ref = motion.aligned_hand_reference()
+
+        error = torch.abs(
+            hand_pos_ref[..., 2]
+            - motion.robot_hand_pos[..., 2]
         )
-    else:
-        body_indices = [
-            H1_TRACKED_BODY_NAMES.index(name)
-            for name in body_names
-        ]
 
-    error = torch.abs(
-        body_pos_ref[
-            :, body_indices, 2
-        ]
-        - motion.robot_body_pos[
-            :, body_indices, 2
-        ]
-    )
+    else:
+        body_pos_ref, _ = motion.aligned_body_reference()
+
+        if body_names is None:
+            body_indices = list(
+                range(len(H1_TRACKED_BODY_NAMES))
+            )
+        else:
+            body_indices = [
+                H1_TRACKED_BODY_NAMES.index(name)
+                for name in body_names
+            ]
+
+        error = torch.abs(
+            body_pos_ref[:, body_indices, 2]
+            - motion.robot_body_pos[:, body_indices, 2]
+        )
 
     return torch.any(
         error > threshold,
         dim=-1,
+    )
+
+def bad_object_pose(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    position_threshold: float,
+    orientation_threshold: float,
+) -> torch.Tensor:
+    """Terminate when deformable-dice pose tracking becomes too inaccurate."""
+
+    motion: MotionCommand = env.command_manager.get_term(
+        command_name
+    )
+
+    if not motion.has_object_reference:
+        return torch.zeros(
+            env.num_envs,
+            dtype=torch.bool,
+            device=env.device,
+        )
+
+    position_error = torch.linalg.norm(
+        motion.cube_pos
+        - motion.simulator_cube_pos,
+        dim=-1,
+    )
+
+    orientation_error = quat_error_magnitude(
+        motion.cube_quat,
+        motion.simulator_cube_quat,
+    )
+
+    return (
+        (position_error > position_threshold)
+        | (orientation_error > orientation_threshold)
     )

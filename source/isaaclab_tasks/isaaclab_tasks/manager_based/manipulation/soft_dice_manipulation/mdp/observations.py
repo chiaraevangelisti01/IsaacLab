@@ -7,6 +7,7 @@ import torch
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils.math import (
     matrix_from_quat,
+    quat_apply_inverse,
     subtract_frame_transforms,
 )
 
@@ -148,4 +149,77 @@ def robot_body_ori_b(
     return mat[..., :2].reshape(
         env.num_envs,
         -1,
+    )
+
+#### Holosoma-like object observatiions
+def object_pos_b(
+    env: ManagerBasedRLEnv,
+    command_name: str = "motion",
+) -> torch.Tensor:
+    """Current deformable-dice position relative to the actual torso."""
+
+    motion: MotionCommand = env.command_manager.get_term(
+        command_name
+    )
+
+    torso_idx = H1_TRACKED_BODY_NAMES.index(
+        "torso_link"
+    )
+
+    pos_b, _ = subtract_frame_transforms(
+        motion.robot_body_pos[:, torso_idx],
+        motion.robot_body_quat[:, torso_idx],
+        motion.simulator_cube_pos,
+        motion.simulator_cube_quat,
+    )
+
+    return pos_b
+
+def object_ori_b(
+    env: ManagerBasedRLEnv,
+    command_name: str = "motion",
+) -> torch.Tensor:
+    """Current deformable-dice orientation relative to the actual torso."""
+
+    motion: MotionCommand = env.command_manager.get_term(
+        command_name
+    )
+
+    torso_idx = H1_TRACKED_BODY_NAMES.index(
+        "torso_link"
+    )
+
+    _, ori_b = subtract_frame_transforms(
+        motion.robot_body_pos[:, torso_idx],
+        motion.robot_body_quat[:, torso_idx],
+        motion.simulator_cube_pos,
+        motion.simulator_cube_quat,
+    )
+
+    mat = matrix_from_quat(ori_b)
+
+    # 6D orientation representation:
+    # first two columns of the rotation matrix.
+    return mat[..., :2].reshape(
+        env.num_envs,
+        -1,
+    )
+
+def object_lin_vel_b(
+    env: ManagerBasedRLEnv,
+    command_name: str = "motion",
+) -> torch.Tensor:
+    """Current deformable-dice linear velocity expressed in the actual torso frame."""
+
+    motion: MotionCommand = env.command_manager.get_term(
+        command_name
+    )
+
+    torso_idx = H1_TRACKED_BODY_NAMES.index(
+        "torso_link"
+    )
+
+    return quat_apply_inverse(
+        motion.robot_body_quat[:, torso_idx],
+        motion.simulator_cube_lin_vel,
     )

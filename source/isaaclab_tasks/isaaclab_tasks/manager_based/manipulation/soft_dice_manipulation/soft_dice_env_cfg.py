@@ -272,6 +272,27 @@ class ObservationsCfg:
             },
         )
 
+        obj_pos_b = ObsTerm(
+            func=mdp.object_pos_b,
+            params={
+                "command_name": "motion",
+            },
+        )
+
+        obj_ori_b = ObsTerm(
+            func=mdp.object_ori_b,
+            params={
+                "command_name": "motion",
+            },
+        )
+
+        obj_lin_vel_b = ObsTerm(
+            func=mdp.object_lin_vel_b,
+            params={
+                "command_name": "motion",
+            },
+        )
+
         joint_pos = ObsTerm(
             func=base_mdp.joint_pos_rel,
             params={
@@ -476,16 +497,35 @@ class RewardsCfg:
         },
     )
 
+    # --------------------------------------------------------------
+    # Object pose tracking.
+    # --------------------------------------------------------------
+
+    object_global_ref_position = RewTerm(
+        func=mdp.object_global_ref_position_error_exp,
+        weight=1.0,
+        params={
+            "command_name": "motion",
+            "std": 0.3,
+        },
+    )
+
+    object_global_ref_orientation = RewTerm(
+        func=mdp.object_global_ref_orientation_error_exp,
+        weight=1.0,
+        params={
+            "command_name": "motion",
+            "std": 0.4,
+        },
+    )
+
 
 @configclass
 class TerminationsCfg:
     """Tracking terminations adapted from BeyondMimic."""
 
     # --------------------------------------------------------------
-    # Task-specific temporary ending.
-    #
-    # Keep this while we always start from frame 0.
-    # Remove it later if/when we implement trajectory-phase resampling.
+    # Task-specific temporary ending..
     # --------------------------------------------------------------
     motion_finished = DoneTerm(
         func=mdp.motion_finished,
@@ -502,10 +542,7 @@ class TerminationsCfg:
     )
 
     # --------------------------------------------------------------
-    # BeyondMimic-style tracking failure.
-    #
-    # Their terminal bodies are wrists/ankles. Our distal tracked
-    # upper-body references are the two elbows--> TO DO PUT VIRTUAL HANDS 
+    # BeyondMimic-style tracking failure --> elbows or hands 
     # --------------------------------------------------------------
     ee_body_pos = DoneTerm(
         func=mdp.bad_motion_body_pos_z_only,
@@ -516,8 +553,22 @@ class TerminationsCfg:
                 "left_elbow_link",
                 "right_elbow_link",
             ],
+            "include_hands": True,
         },
     )
+
+    # --------------------------------------------------------------
+    # Holosoma object pose tracking failure.
+    # --------------------------------------------------------------
+    object_pose = DoneTerm(
+        func=mdp.bad_object_pose,
+        params={
+            "command_name": "motion",
+            "position_threshold": 0.25,
+            "orientation_threshold": 0.8,
+        },
+    )
+
 @configclass
 class SoftDiceTrackingEnvCfg(ManagerBasedRLEnvCfg):
     scene: SoftDiceSceneCfg = SoftDiceSceneCfg(num_envs=256, env_spacing=2.0, replicate_physics=False)

@@ -31,6 +31,8 @@ from .motion_utils import (
     transform_body_reference_to_fixed_root,
 )
 
+from .deformable_utils import estimate_deformable_orientation_kabsch
+
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
     from .motion_command_cfg import MotionCommandCfg
@@ -681,6 +683,40 @@ class MotionCommand(CommandTerm):
         return self._cube_quat_all[self._frame_idx]
 
     @property
+    def simulator_cube_pos(self) -> torch.Tensor:
+        """Current deformable-dice centroid in environment-local coordinates."""
+
+        return (
+            self.cube.data.root_pos_w.torch
+            - self._env.scene.env_origins
+        )
+
+
+    @property
+    def simulator_cube_lin_vel(self) -> torch.Tensor:
+        """Current deformable-dice centroid velocity in world axes."""
+
+        return self.cube.data.root_vel_w.torch
+
+
+    @property
+    def simulator_cube_quat(self) -> torch.Tensor:
+        """Current bulk orientation of the deformable dice in XYZW convention."""
+
+        reference_nodal_pos = (
+            self.cube.data.default_nodal_state_w.torch[..., :3]
+        )
+
+        current_nodal_pos = (
+            self.cube.data.nodal_pos_w.torch
+        )
+
+        return estimate_deformable_orientation_kabsch(
+            reference_nodal_pos=reference_nodal_pos,
+            current_nodal_pos=current_nodal_pos,
+        )
+
+    @property
     def finished(self) -> torch.Tensor:
         if self.cfg.loop:
             return torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
@@ -930,7 +966,7 @@ class MotionCommand(CommandTerm):
         cube_center_e = cube_center_w - self._env.scene.env_origins
 
         cube_pos_error = torch.linalg.norm(
-            cube_center_e - self.cube_pos,
+            self.simulator_cube_pos - self.cube_pos,
             dim=-1,
         )
 
