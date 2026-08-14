@@ -13,3 +13,19 @@ gym.register(
         "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:SoftDiceTrackingPPORunnerCfg",
     },
 )
+
+gym.register(
+    id="Isaac-Soft-Dice-Tracking-H1-Eval-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.soft_dice_eval_env_cfg:"
+            "SoftDiceTrackingEvalEnvCfg"
+        ),
+        "rsl_rl_cfg_entry_point": (
+            f"{agents.__name__}.rsl_rl_ppo_cfg:"
+            "SoftDiceTrackingPPORunnerCfg"
+        ),
+    },
+)
