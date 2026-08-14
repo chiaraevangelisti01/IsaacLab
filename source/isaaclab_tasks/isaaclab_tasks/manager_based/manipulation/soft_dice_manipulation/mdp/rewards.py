@@ -7,7 +7,7 @@ import torch
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils.math import quat_error_magnitude
 
-from .motion_utils import H1_TRACKED_BODY_NAMES
+from ..utils.motion_utils import H1_TRACKED_BODY_NAMES
 
 if TYPE_CHECKING:
     from isaaclab.assets import Articulation

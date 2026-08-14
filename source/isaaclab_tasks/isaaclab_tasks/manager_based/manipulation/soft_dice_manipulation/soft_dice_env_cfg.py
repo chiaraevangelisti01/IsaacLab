@@ -19,14 +19,14 @@ from isaaclab_assets.robots.unitree_h1_aist import H1_FIXED_CFG
 from isaaclab_physx.physics import PhysxCfg
 from isaaclab_physx.sim import PhysxDeformableBodyMaterialCfg
 from . import mdp
-from .mdp.motion_utils import (
+from .utils.actions_utils import build_joint_action_scale
+from .utils.motion_utils import (
     CUSTOM_DICE_DEFORMABLE_USD,
     CUSTOM_DICE_SCALE,
     desired_cube_pose_from_holosoma,
     load_motion_file,
     validate_asset_paths,
 )
-
 
 DEFAULT_CUBE_SIZE = 0.31
 DEFAULT_TABLE_LENGTH = 0.80
@@ -45,7 +45,7 @@ H1_TRACKING_JOINT_NAMES = [
     "right_elbow",
 ]
 
-H1_TRACKING_ACTION_SCALE = mdp.build_joint_action_scale(
+H1_TRACKING_ACTION_SCALE = build_joint_action_scale(
     robot_cfg=H1_FIXED_CFG,
     joint_names=H1_TRACKING_JOINT_NAMES,
     scale_factor=0.25,

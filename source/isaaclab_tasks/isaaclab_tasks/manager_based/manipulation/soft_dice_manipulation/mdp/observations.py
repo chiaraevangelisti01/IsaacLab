@@ -11,7 +11,7 @@ from isaaclab.utils.math import (
     subtract_frame_transforms,
 )
 
-from .motion_utils import H1_TRACKED_BODY_NAMES
+from ..utils.motion_utils import H1_TRACKED_BODY_NAMES
 
 if TYPE_CHECKING:
     from isaaclab.assets import Articulation

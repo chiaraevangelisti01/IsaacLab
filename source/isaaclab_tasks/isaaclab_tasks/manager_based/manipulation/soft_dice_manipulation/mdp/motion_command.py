@@ -18,7 +18,7 @@ from isaaclab.utils.math import (
     yaw_quat,
 )
 
-from .motion_utils import (
+from ..utils.motion_utils import (
     H1_HAND_OFFSETS_B,
     H1_HAND_PARENT_BODY_NAMES,
     H1_HAND_REFERENCE_NAMES,
@@ -31,7 +31,7 @@ from .motion_utils import (
     transform_body_reference_to_fixed_root,
 )
 
-from .deformable_utils import estimate_deformable_orientation_kabsch
+from ..utils.deformable_utils import estimate_deformable_orientation_kabsch
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv

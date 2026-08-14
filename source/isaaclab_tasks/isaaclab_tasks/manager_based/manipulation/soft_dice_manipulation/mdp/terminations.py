@@ -8,7 +8,7 @@ if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
     from .motion_command import MotionCommand
 
-from .motion_utils import H1_TRACKED_BODY_NAMES
+from ..utils.motion_utils import H1_TRACKED_BODY_NAMES
 
 from isaaclab.utils.math import quat_error_magnitude
 
