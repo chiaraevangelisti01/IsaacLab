@@ -135,6 +135,9 @@ from isaaclab_tasks.utils.parse_cfg import (
 from isaaclab_tasks.manager_based.manipulation.soft_dice_manipulation.evaluation.pose_metrics import (
     compute_terminal_cube_pose_metrics,
 )
+from isaaclab_tasks.manager_based.manipulation.soft_dice_manipulation.evaluation.trajectory_metrics import (
+    compute_cartesian_trajectory_metrics,
+)
 
 # -----------------------------------------------------------------------------
 # Helpers
@@ -528,12 +531,21 @@ def main():
                     if not bool(terminal["terminal_valid"][env_id].item()):
                         raise RuntimeError(f"Missing terminal snapshot for env {env_id}.")
 
+                
                     terminal_steps = int(terminal["episode_steps"][env_id].item())
                     terminal_frame = int(terminal["motion_frame"][env_id].item())
                     cube_pos = (terminal["cube_pos_e"][env_id].detach().cpu())
                     cube_quat = (terminal["cube_quat_xyzw"][env_id].detach().cpu())
                     reference_cube_pos = (terminal["reference_cube_pos_e"][env_id].detach().cpu())
                     reference_cube_quat = (terminal["reference_cube_quat_xyzw"][env_id].detach().cpu())
+
+                    if terminal_steps != steps:
+                        raise RuntimeError(
+                            "Episode-step mismatch for "
+                            f"env {env_id}: "
+                            f"runner={steps}, "
+                            f"recorder={terminal_steps}."
+                        )
 
                     record.update(
                         {
@@ -555,6 +567,104 @@ def main():
                             "reference_cube_qy": float(reference_cube_quat[1]),
                             "reference_cube_qz": float(reference_cube_quat[2]),
                             "reference_cube_qw": float(reference_cube_quat[3]),
+                        }
+                    )
+                    trajectory = terminal["trajectory"]
+
+                    body_position_error_m = (
+                        trajectory[
+                            "body_position_error_m"
+                        ][
+                            env_id,
+                            :terminal_steps,
+                        ]
+                        .detach()
+                        .cpu()
+                    )
+
+                    body_orientation_error_rad = (
+                        trajectory[
+                            "body_orientation_error_rad"
+                        ][
+                            env_id,
+                            :terminal_steps,
+                        ]
+                        .detach()
+                        .cpu()
+                    )
+
+                    hand_position_error_m = (
+                        trajectory[
+                            "hand_position_error_m"
+                        ][
+                            env_id,
+                            :terminal_steps,
+                        ]
+                        .detach()
+                        .cpu()
+                    )
+
+                    cube_position_error_m = (
+                        trajectory[
+                            "cube_position_error_m"
+                        ][
+                            env_id,
+                            :terminal_steps,
+                        ]
+                        .detach()
+                        .cpu()
+                    )
+
+                    cube_xy_position_error_m = (
+                        trajectory[
+                            "cube_xy_position_error_m"
+                        ][
+                            env_id,
+                            :terminal_steps,
+                        ]
+                        .detach()
+                        .cpu()
+                    )
+
+                    cube_orientation_error_rad = (
+                        trajectory[
+                            "cube_orientation_error_rad"
+                        ][
+                            env_id,
+                            :terminal_steps,
+                        ]
+                        .detach()
+                        .cpu()
+                    )
+
+                    trajectory_metrics = (
+                        compute_cartesian_trajectory_metrics(
+                            body_position_error_m=(
+                                body_position_error_m
+                            ),
+                            body_orientation_error_rad=(
+                                body_orientation_error_rad
+                            ),
+                            hand_position_error_m=(
+                                hand_position_error_m
+                            ),
+                            cube_position_error_m=(
+                                cube_position_error_m
+                            ),
+                            cube_xy_position_error_m=(
+                                cube_xy_position_error_m
+                            ),
+                            cube_orientation_error_rad=(
+                                cube_orientation_error_rad
+                            ),
+                        )
+                    )
+
+                    record.update(
+                        {
+                            key: float(value.item())
+                            for key, value
+                            in trajectory_metrics.items()
                         }
                     )
 

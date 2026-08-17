@@ -12,6 +12,16 @@ from isaaclab.managers import (
 )
 from isaaclab.utils.configclass import configclass
 
+from ..utils.geometry_utils import (
+    orientation_error,
+    vector_error,
+    xy_position_error,
+)
+
+from ..utils.motion_utils import (
+    H1_HAND_REFERENCE_NAMES,
+    H1_TRACKED_BODY_NAMES,
+)
 
 class SoftDiceEvaluationRecorder(RecorderTerm):
     """Capture terminal physical state before Isaac Lab resets an environment."""
@@ -25,6 +35,16 @@ class SoftDiceEvaluationRecorder(RecorderTerm):
 
         self._motion = env.command_manager.get_term(
             "motion"
+        )
+
+        self._max_episode_steps = (
+            env.max_episode_length
+        )
+
+        self._env_ids = torch.arange(
+            env.num_envs,
+            dtype=torch.long,
+            device=env.device,
         )
 
         # ------------------------------------------------------------------
@@ -84,8 +104,230 @@ class SoftDiceEvaluationRecorder(RecorderTerm):
                 dtype=torch.bool,
                 device=env.device,
             ),
+            "trajectory": {
+                "motion_frame": torch.full(
+                    (
+                        env.num_envs,
+                        self._max_episode_steps,
+                    ),
+                    -1,
+                    dtype=torch.long,
+                    device=env.device,
+                ),
+
+                "body_position_error_m": torch.zeros(
+                    (
+                        env.num_envs,
+                        self._max_episode_steps,
+                        len(H1_TRACKED_BODY_NAMES),
+                    ),
+                    dtype=torch.float32,
+                    device=env.device,
+                ),
+
+                "body_orientation_error_rad": torch.zeros(
+                    (
+                        env.num_envs,
+                        self._max_episode_steps,
+                        len(H1_TRACKED_BODY_NAMES),
+                    ),
+                    dtype=torch.float32,
+                    device=env.device,
+                ),
+
+                "hand_position_error_m": torch.zeros(
+                    (
+                        env.num_envs,
+                        self._max_episode_steps,
+                        len(H1_HAND_REFERENCE_NAMES),
+                    ),
+                    dtype=torch.float32,
+                    device=env.device,
+                ),
+
+                "cube_position_error_m": torch.zeros(
+                    (
+                        env.num_envs,
+                        self._max_episode_steps,
+                    ),
+                    dtype=torch.float32,
+                    device=env.device,
+                ),
+
+                "cube_xy_position_error_m": torch.zeros(
+                    (
+                        env.num_envs,
+                        self._max_episode_steps,
+                    ),
+                    dtype=torch.float32,
+                    device=env.device,
+                ),
+
+                "cube_orientation_error_rad": torch.zeros(
+                    (
+                        env.num_envs,
+                        self._max_episode_steps,
+                    ),
+                    dtype=torch.float32,
+                    device=env.device,
+                ),
+            },
         }
 
+    def record_post_step(
+        self,
+    ) -> tuple[None, None]:
+        """Record Cartesian tracking errors for the current control step."""
+
+        # episode_length_buf has already been incremented when
+        # record_post_step() is called, therefore subtract one
+        # to obtain a zero-based trajectory index.
+        step_idx = (
+            self._env.episode_length_buf
+            - 1
+        )
+
+        if torch.any(step_idx < 0):
+            raise RuntimeError(
+                "Negative evaluation trajectory index."
+            )
+
+        if torch.any(
+            step_idx >= self._max_episode_steps
+        ):
+            raise RuntimeError(
+                "Evaluation trajectory exceeded the "
+                "allocated episode buffer."
+            )
+
+        if not self._motion.has_body_reference:
+            raise RuntimeError(
+                "Cartesian trajectory evaluation requires "
+                "body references."
+            )
+
+        if not self._motion.has_hand_reference:
+            raise RuntimeError(
+                "Cartesian trajectory evaluation requires "
+                "hand references."
+            )
+
+        if not self._motion.has_object_reference:
+            raise RuntimeError(
+                "Cartesian trajectory evaluation requires "
+                "an object reference."
+            )
+
+        trajectory = (
+            self._env.extras[
+                "evaluation"
+            ]["trajectory"]
+        )
+
+        # --------------------------------------------------------------
+        # Body Cartesian tracking.
+        #
+        # Use exactly the same yaw-aligned reference used by the
+        # Cartesian body tracking reward.
+        # --------------------------------------------------------------
+
+        (
+            body_pos_ref,
+            body_quat_ref,
+        ) = self._motion.aligned_body_reference()
+
+        body_position_error = vector_error(
+            reference=body_pos_ref,
+            current=self._motion.robot_body_pos,
+        )
+
+        body_orientation_error = orientation_error(
+            reference_quat=body_quat_ref,
+            current_quat=self._motion.robot_body_quat,
+        )
+
+        # --------------------------------------------------------------
+        # Hand Cartesian tracking.
+        # --------------------------------------------------------------
+
+        hand_pos_ref = (
+            self._motion.aligned_hand_reference()
+        )
+
+        hand_position_error = vector_error(
+            reference=hand_pos_ref,
+            current=self._motion.robot_hand_pos,
+        )
+
+        # --------------------------------------------------------------
+        # Cube Cartesian trajectory tracking.
+        # --------------------------------------------------------------
+
+        cube_position_error = vector_error(
+            reference=self._motion.cube_pos,
+            current=self._motion.simulator_cube_pos,
+        )
+
+        cube_xy_position_error = (
+            xy_position_error(
+                reference_pos=self._motion.cube_pos,
+                current_pos=(
+                    self._motion.simulator_cube_pos
+                ),
+            )
+        )
+
+        cube_orientation_error = orientation_error(
+            reference_quat=self._motion.cube_quat,
+            current_quat=(
+                self._motion.simulator_cube_quat
+            ),
+        )
+
+        # --------------------------------------------------------------
+        # Store this control step.
+        # --------------------------------------------------------------
+
+        trajectory["motion_frame"][
+            self._env_ids,
+            step_idx,
+        ] = self._motion.frame_idx
+
+        trajectory["body_position_error_m"][
+            self._env_ids,
+            step_idx,
+            :,
+        ] = body_position_error
+
+        trajectory["body_orientation_error_rad"][
+            self._env_ids,
+            step_idx,
+            :,
+        ] = body_orientation_error
+
+        trajectory["hand_position_error_m"][
+            self._env_ids,
+            step_idx,
+            :,
+        ] = hand_position_error
+
+        trajectory["cube_position_error_m"][
+            self._env_ids,
+            step_idx,
+        ] = cube_position_error
+
+        trajectory["cube_xy_position_error_m"][
+            self._env_ids,
+            step_idx,
+        ] = cube_xy_position_error
+
+        trajectory["cube_orientation_error_rad"][
+            self._env_ids,
+            step_idx,
+        ] = cube_orientation_error
+
+        return None, None
+    
     def record_pre_reset(
         self,
         env_ids: Sequence[int] | None,
