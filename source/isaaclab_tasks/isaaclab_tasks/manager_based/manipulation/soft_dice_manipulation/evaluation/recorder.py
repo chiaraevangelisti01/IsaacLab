@@ -12,35 +12,33 @@ from isaaclab.managers import (
 )
 from isaaclab.utils.configclass import configclass
 
-from ..utils.geometry_utils import (
-    orientation_error,
-    vector_error,
-    xy_position_error,
-)
+from ..utils.geometry_utils import orientation_error, vector_error, xy_position_error
+from ..utils.motion_utils import H1_HAND_REFERENCE_NAMES, H1_TRACKED_BODY_NAMES
 
-from ..utils.motion_utils import (
-    H1_HAND_REFERENCE_NAMES,
-    H1_TRACKED_BODY_NAMES,
-)
 
 class SoftDiceEvaluationRecorder(RecorderTerm):
-    """Capture terminal physical state before Isaac Lab resets an environment."""
+    """Capture terminal state and per-step evaluation data."""
 
-    def __init__(
-        self,
-        cfg: RecorderTermCfg,
-        env,
-    ) -> None:
+    def __init__(self, cfg: RecorderTermCfg, env) -> None:
         super().__init__(cfg, env)
 
-        self._motion = env.command_manager.get_term(
-            "motion"
+        self._motion = env.command_manager.get_term("motion")
+
+        action_cfg = env.cfg.actions.joint_pos
+        joint_ids, joint_names = self._motion.robot.find_joints(
+            action_cfg.joint_names,
+            preserve_order=action_cfg.preserve_order,
         )
 
-        self._max_episode_steps = (
-            env.max_episode_length
+        self._controlled_joint_ids = torch.as_tensor(
+            joint_ids,
+            dtype=torch.long,
+            device=env.device,
         )
+        self._controlled_joint_names = list(joint_names)
+        self._num_controlled_joints = len(joint_names)
 
+        self._max_episode_steps = env.max_episode_length
         self._env_ids = torch.arange(
             env.num_envs,
             dtype=torch.long,
@@ -106,15 +104,11 @@ class SoftDiceEvaluationRecorder(RecorderTerm):
             ),
             "trajectory": {
                 "motion_frame": torch.full(
-                    (
-                        env.num_envs,
-                        self._max_episode_steps,
-                    ),
+                    (env.num_envs, self._max_episode_steps),
                     -1,
                     dtype=torch.long,
                     device=env.device,
                 ),
-
                 "body_position_error_m": torch.zeros(
                     (
                         env.num_envs,
@@ -124,7 +118,6 @@ class SoftDiceEvaluationRecorder(RecorderTerm):
                     dtype=torch.float32,
                     device=env.device,
                 ),
-
                 "body_orientation_error_rad": torch.zeros(
                     (
                         env.num_envs,
@@ -134,7 +127,6 @@ class SoftDiceEvaluationRecorder(RecorderTerm):
                     dtype=torch.float32,
                     device=env.device,
                 ),
-
                 "hand_position_error_m": torch.zeros(
                     (
                         env.num_envs,
@@ -144,38 +136,40 @@ class SoftDiceEvaluationRecorder(RecorderTerm):
                     dtype=torch.float32,
                     device=env.device,
                 ),
-
                 "cube_position_error_m": torch.zeros(
-                    (
-                        env.num_envs,
-                        self._max_episode_steps,
-                    ),
+                    (env.num_envs, self._max_episode_steps),
                     dtype=torch.float32,
                     device=env.device,
                 ),
-
                 "cube_xy_position_error_m": torch.zeros(
-                    (
-                        env.num_envs,
-                        self._max_episode_steps,
-                    ),
+                    (env.num_envs, self._max_episode_steps),
                     dtype=torch.float32,
                     device=env.device,
                 ),
-
                 "cube_orientation_error_rad": torch.zeros(
-                    (
-                        env.num_envs,
-                        self._max_episode_steps,
-                    ),
+                    (env.num_envs, self._max_episode_steps),
                     dtype=torch.float32,
                     device=env.device,
                 ),
                 "cube_position_delta_m": torch.zeros(
+                    (env.num_envs, self._max_episode_steps, 3),
+                    dtype=torch.float32,
+                    device=env.device,
+                ),
+                "joint_torque_nm": torch.zeros(
                     (
                         env.num_envs,
                         self._max_episode_steps,
-                        3,
+                        self._num_controlled_joints,
+                    ),
+                    dtype=torch.float32,
+                    device=env.device,
+                ),
+                "action_delta": torch.zeros(
+                    (
+                        env.num_envs,
+                        self._max_episode_steps,
+                        self._num_controlled_joints,
                     ),
                     dtype=torch.float32,
                     device=env.device,
@@ -183,67 +177,43 @@ class SoftDiceEvaluationRecorder(RecorderTerm):
             },
         }
 
-    def record_post_step(
-        self,
-    ) -> tuple[None, None]:
-        """Record Cartesian tracking errors for the current control step."""
+    def record_post_step(self) -> tuple[None, None]:
+        """Record evaluation quantities for the current control step."""
 
-        # episode_length_buf has already been incremented when
-        # record_post_step() is called, therefore subtract one
-        # to obtain a zero-based trajectory index.
-        step_idx = (
-            self._env.episode_length_buf
-            - 1
-        )
+        # episode_length_buf has already been incremented here.
+        step_idx = self._env.episode_length_buf - 1
 
         if torch.any(step_idx < 0):
-            raise RuntimeError(
-                "Negative evaluation trajectory index."
-            )
+            raise RuntimeError("Negative evaluation trajectory index.")
 
-        if torch.any(
-            step_idx >= self._max_episode_steps
-        ):
+        if torch.any(step_idx >= self._max_episode_steps):
             raise RuntimeError(
-                "Evaluation trajectory exceeded the "
-                "allocated episode buffer."
+                "Evaluation trajectory exceeded the allocated episode buffer."
             )
 
         if not self._motion.has_body_reference:
             raise RuntimeError(
-                "Cartesian trajectory evaluation requires "
-                "body references."
+                "Cartesian trajectory evaluation requires body references."
             )
 
         if not self._motion.has_hand_reference:
             raise RuntimeError(
-                "Cartesian trajectory evaluation requires "
-                "hand references."
+                "Cartesian trajectory evaluation requires hand references."
             )
 
         if not self._motion.has_object_reference:
             raise RuntimeError(
-                "Cartesian trajectory evaluation requires "
-                "an object reference."
+                "Cartesian trajectory evaluation requires an object reference."
             )
 
-        trajectory = (
-            self._env.extras[
-                "evaluation"
-            ]["trajectory"]
-        )
+        trajectory = self._env.extras["evaluation"]["trajectory"]
 
         # --------------------------------------------------------------
         # Body Cartesian tracking.
-        #
-        # Use exactly the same yaw-aligned reference used by the
-        # Cartesian body tracking reward.
+        # Use the same yaw-aligned reference as the tracking reward.
         # --------------------------------------------------------------
 
-        (
-            body_pos_ref,
-            body_quat_ref,
-        ) = self._motion.aligned_body_reference()
+        body_pos_ref, body_quat_ref = self._motion.aligned_body_reference()
 
         body_position_error = vector_error(
             reference=body_pos_ref,
@@ -259,9 +229,7 @@ class SoftDiceEvaluationRecorder(RecorderTerm):
         # Hand Cartesian tracking.
         # --------------------------------------------------------------
 
-        hand_pos_ref = (
-            self._motion.aligned_hand_reference()
-        )
+        hand_pos_ref = self._motion.aligned_hand_reference()
 
         hand_position_error = vector_error(
             reference=hand_pos_ref,
@@ -269,14 +237,14 @@ class SoftDiceEvaluationRecorder(RecorderTerm):
         )
 
         # --------------------------------------------------------------
-        # Cube Cartesian trajectory tracking.
+        # Cube trajectory tracking.
         # --------------------------------------------------------------
-        # Signed Cartesian displacement error:
-        # positive means the simulated cube lies in the
-        # positive axis direction relative to the reference.
+
+        # Signed Cartesian displacement:
+        # positive means simulated cube is in the positive axis direction
+        # relative to the reference.
         cube_position_delta = (
-            self._motion.simulator_cube_pos
-            - self._motion.cube_pos
+            self._motion.simulator_cube_pos - self._motion.cube_pos
         )
 
         cube_position_error = vector_error(
@@ -284,72 +252,73 @@ class SoftDiceEvaluationRecorder(RecorderTerm):
             current=self._motion.simulator_cube_pos,
         )
 
-        cube_xy_position_error = (
-            xy_position_error(
-                reference_pos=self._motion.cube_pos,
-                current_pos=(
-                    self._motion.simulator_cube_pos
-                ),
-            )
+        cube_xy_position_error = xy_position_error(
+            reference_pos=self._motion.cube_pos,
+            current_pos=self._motion.simulator_cube_pos,
         )
 
         cube_orientation_error = orientation_error(
             reference_quat=self._motion.cube_quat,
-            current_quat=(
-                self._motion.simulator_cube_quat
-            ),
+            current_quat=self._motion.simulator_cube_quat,
         )
 
         # --------------------------------------------------------------
-        # Store this control step.
+        # Torque and action smoothness.
         # --------------------------------------------------------------
 
-        trajectory["motion_frame"][
-            self._env_ids,
-            step_idx,
-        ] = self._motion.frame_idx
+        joint_torque_nm = self._motion.robot.data.applied_torque.torch[
+            :, self._controlled_joint_ids
+        ]
+
+        action_delta = (
+            self._env.action_manager.action
+            - self._env.action_manager.prev_action
+        )
+
+        # --------------------------------------------------------------
+        # Store current control step.
+        # --------------------------------------------------------------
+
+        trajectory["motion_frame"][self._env_ids, step_idx] = self._motion.frame_idx
 
         trajectory["body_position_error_m"][
-            self._env_ids,
-            step_idx,
-            :,
+            self._env_ids, step_idx, :
         ] = body_position_error
 
         trajectory["body_orientation_error_rad"][
-            self._env_ids,
-            step_idx,
-            :,
+            self._env_ids, step_idx, :
         ] = body_orientation_error
 
         trajectory["hand_position_error_m"][
-            self._env_ids,
-            step_idx,
-            :,
+            self._env_ids, step_idx, :
         ] = hand_position_error
-        
+
         trajectory["cube_position_delta_m"][
-            self._env_ids,
-            step_idx,
-            :,
+            self._env_ids, step_idx, :
         ] = cube_position_delta
 
         trajectory["cube_position_error_m"][
-            self._env_ids,
-            step_idx,
+            self._env_ids, step_idx
         ] = cube_position_error
 
         trajectory["cube_xy_position_error_m"][
-            self._env_ids,
-            step_idx,
+            self._env_ids, step_idx
         ] = cube_xy_position_error
 
         trajectory["cube_orientation_error_rad"][
-            self._env_ids,
-            step_idx,
+            self._env_ids, step_idx
         ] = cube_orientation_error
 
+        trajectory["joint_torque_nm"][
+            self._env_ids, step_idx, :
+        ] = joint_torque_nm
+
+        trajectory["action_delta"][
+            self._env_ids, step_idx, :
+        ] = action_delta
+
         return None, None
-    
+
     def record_pre_reset(
         self,
         env_ids: Sequence[int] | None,
@@ -378,76 +347,45 @@ class SoftDiceEvaluationRecorder(RecorderTerm):
         cube_pos = self._motion.simulator_cube_pos
         cube_quat = self._motion.simulator_cube_quat
 
-        # Current reference state. At motion_finished this should be the
-        # final reference frame.
+        # Current reference state. At motion_finished this should be
+        # the final reference frame.
         reference_cube_pos = self._motion.cube_pos
         reference_cube_quat = self._motion.cube_quat
 
         output["terminal_valid"][env_ids_t] = True
+        output["episode_steps"][env_ids_t] = self._env.episode_length_buf[env_ids_t]
+        output["motion_frame"][env_ids_t] = self._motion.frame_idx[env_ids_t]
 
-        output["episode_steps"][env_ids_t] = (
-            self._env.episode_length_buf[env_ids_t]
-        )
+        output["cube_pos_e"][env_ids_t] = cube_pos[env_ids_t]
+        output["cube_quat_xyzw"][env_ids_t] = cube_quat[env_ids_t]
 
-        output["motion_frame"][env_ids_t] = (
-            self._motion.frame_idx[env_ids_t]
-        )
+        output["reference_cube_pos_e"][env_ids_t] = reference_cube_pos[env_ids_t]
+        output["reference_cube_quat_xyzw"][env_ids_t] = reference_cube_quat[env_ids_t]
 
-        output["cube_pos_e"][env_ids_t] = (
-            cube_pos[env_ids_t]
-        )
+        termination_manager = self._env.termination_manager
 
-        output["cube_quat_xyzw"][env_ids_t] = (
-            cube_quat[env_ids_t]
-        )
+        output["motion_finished"][env_ids_t] = termination_manager.get_term(
+            "motion_finished"
+        )[env_ids_t]
 
-        output["reference_cube_pos_e"][env_ids_t] = (
-            reference_cube_pos[env_ids_t]
-        )
-
-        output["reference_cube_quat_xyzw"][env_ids_t] = (
-            reference_cube_quat[env_ids_t]
-        )
-
-        termination_manager = (
-            self._env.termination_manager
-        )
-
-        output["motion_finished"][env_ids_t] = (
-            termination_manager
-            .get_term("motion_finished")[env_ids_t]
-        )
-
-        output["time_out"][env_ids_t] = (
-            termination_manager
-            .get_term("time_out")[env_ids_t]
-        )
+        output["time_out"][env_ids_t] = termination_manager.get_term(
+            "time_out"
+        )[env_ids_t]
 
         return None, None
 
 
 @configclass
-class SoftDiceEvaluationRecorderTermCfg(
-    RecorderTermCfg
-):
-    class_type: type[RecorderTerm] = (
-        SoftDiceEvaluationRecorder
-    )
+class SoftDiceEvaluationRecorderTermCfg(RecorderTermCfg):
+    class_type: type[RecorderTerm] = SoftDiceEvaluationRecorder
 
 
 @configclass
-class SoftDiceEvaluationRecordersCfg(
-    RecorderManagerBaseCfg
-):
+class SoftDiceEvaluationRecordersCfg(RecorderManagerBaseCfg):
     """Recorder configuration used only by the evaluation environment."""
 
-    terminal_state = (
-        SoftDiceEvaluationRecorderTermCfg()
-    )
+    terminal_state = SoftDiceEvaluationRecorderTermCfg()
 
-    dataset_export_mode = (
-        DatasetExportMode.EXPORT_NONE
-    )
-
+    dataset_export_mode = DatasetExportMode.EXPORT_NONE
     export_in_record_pre_reset = False
     export_in_close = False
