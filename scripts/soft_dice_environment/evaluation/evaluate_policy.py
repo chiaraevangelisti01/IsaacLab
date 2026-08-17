@@ -132,6 +132,9 @@ from isaaclab_tasks.utils.parse_cfg import (
     load_cfg_from_registry,
 )
 
+from isaaclab_tasks.manager_based.manipulation.soft_dice_manipulation.evaluation.pose_metrics import (
+    compute_terminal_cube_pose_metrics,
+)
 
 # -----------------------------------------------------------------------------
 # Helpers
@@ -252,6 +255,7 @@ def write_results(
 # -----------------------------------------------------------------------------
 
 def main():
+    
     if args_cli.num_episodes <= 0:
         raise ValueError("--num_episodes must be > 0." )
 
@@ -414,8 +418,8 @@ def main():
             f"Unsupported runner class: "
             f"{agent_cfg.class_name}"
         )
-
-    # Follow the ordering used by Isaac Lab's play script.
+    
+    #Follow the ordering used by Isaac Lab's play script.
     if args_cli.deterministic:
         configure_seed(
             env_cfg.seed,
@@ -424,7 +428,9 @@ def main():
 
     runner.load(resume_path)
 
-    policy = runner.get_inference_policy(device=env.unwrapped.device)
+    policy = runner.get_inference_policy(
+        device=env.unwrapped.device
+    )
 
     # Older RSL-RL releases reset the network
     # rather than the inference-policy object.
@@ -455,6 +461,7 @@ def main():
     records: list[dict] = []
 
     try:
+       
         while (simulation_app.is_running() and len(records) < args_cli.num_episodes):
 
             with torch.inference_mode():
@@ -548,6 +555,23 @@ def main():
                             "reference_cube_qy": float(reference_cube_quat[1]),
                             "reference_cube_qz": float(reference_cube_quat[2]),
                             "reference_cube_qw": float(reference_cube_quat[3]),
+                        }
+                    )
+
+                    pose_metrics = (
+                        compute_terminal_cube_pose_metrics(
+                            reference_pos=reference_cube_pos,
+                            current_pos=cube_pos,
+                            reference_quat=reference_cube_quat,
+                            current_quat=cube_quat,
+                        )
+                    )
+
+                    record.update(
+                        {
+                            key: float(value.item())
+                            for key, value
+                            in pose_metrics.items()
                         }
                     )
 
@@ -655,8 +679,23 @@ def main():
     wb_run.finish()
 
 
+
 if __name__ == "__main__":
     try:
         main()
+
+    except BaseException as exc:
+        import traceback
+
+        print(
+            "[FATAL DEBUG]",
+            type(exc).__name__,
+            repr(exc),
+        )
+
+        traceback.print_exc()
+
+        raise
+
     finally:
         simulation_app.close()

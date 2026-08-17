@@ -10,7 +10,10 @@ if TYPE_CHECKING:
 
 from ..utils.motion_utils import H1_TRACKED_BODY_NAMES
 
-from isaaclab.utils.math import quat_error_magnitude
+from ..utils.geometry_utils import (
+    orientation_error,
+    vector_error,
+)
 
 def motion_finished(
     env: ManagerBasedRLEnv,
@@ -100,18 +103,17 @@ def bad_object_pose(
             device=env.device,
         )
 
-    position_error = torch.linalg.norm(
-        motion.cube_pos
-        - motion.simulator_cube_pos,
-        dim=-1,
+    position_error_m = vector_error(
+        reference=motion.cube_pos,
+        current=motion.simulator_cube_pos,
     )
 
-    orientation_error = quat_error_magnitude(
-        motion.cube_quat,
-        motion.simulator_cube_quat,
+    orientation_error_rad = orientation_error(
+        reference_quat=motion.cube_quat,
+        current_quat=motion.simulator_cube_quat,
     )
 
     return (
-        (position_error > position_threshold)
-        | (orientation_error > orientation_threshold)
+        (position_error_m > position_threshold)
+        | (orientation_error_rad > orientation_threshold)
     )

@@ -5,8 +5,10 @@ from typing import TYPE_CHECKING
 import torch
 
 from isaaclab.managers import SceneEntityCfg
-from isaaclab.utils.math import quat_error_magnitude
-
+from ..utils.geometry_utils import (
+    orientation_error,
+    vector_error,
+)
 from ..utils.motion_utils import H1_TRACKED_BODY_NAMES
 
 if TYPE_CHECKING:
@@ -29,10 +31,12 @@ def motion_global_anchor_orientation_error_exp(
         "torso_link"
     )
 
-    error = quat_error_magnitude(
-        motion.body_quat[:, torso_idx],
-        motion.robot_body_quat[:, torso_idx],
-    ) ** 2
+    error = torch.square(
+        orientation_error(
+            reference_quat= motion.body_quat[:, torso_idx],
+            current_quat= motion.robot_body_quat[:, torso_idx],
+        )
+    )
 
     return torch.exp(
         -error / (std * std)
@@ -53,12 +57,11 @@ def motion_relative_body_position_error_exp(
 
         body_pos_ref, _ = motion.aligned_body_reference()
 
-        body_error = torch.sum(
-            torch.square(
-                body_pos_ref
-                - motion.robot_body_pos
-            ),
-            dim=-1,
+        body_error = torch.square(
+            vector_error(
+                reference=body_pos_ref,
+                current=motion.robot_body_pos,
+            )
         )
 
         if include_hands:
@@ -70,12 +73,11 @@ def motion_relative_body_position_error_exp(
 
             hand_pos_ref = motion.aligned_hand_reference()
 
-            hand_error = torch.sum(
-                torch.square(
-                    hand_pos_ref
-                    - motion.robot_hand_pos
-                ),
-                dim=-1,
+            hand_error = torch.square(
+                vector_error(
+                    reference=hand_pos_ref,
+                    current=motion.robot_hand_pos,
+                )
             )
 
             error = torch.cat(
@@ -107,10 +109,12 @@ def motion_relative_body_orientation_error_exp(
 
     _, body_quat_ref = motion.aligned_body_reference()
 
-    error = quat_error_magnitude(
-        body_quat_ref,
-        motion.robot_body_quat,
-    ) ** 2
+    error = torch.square(
+        orientation_error(
+            reference_quat= body_quat_ref,
+            current_quat=motion.robot_body_quat,
+        )
+    )
 
     return torch.exp(
         -torch.mean(error, dim=-1)
@@ -129,12 +133,11 @@ def motion_global_body_linear_velocity_error_exp(
         command_name
     )
 
-    error = torch.sum(
-        torch.square(
-            motion.body_lin_vel
-            - motion.robot_body_lin_vel
-        ),
-        dim=-1,
+    error = torch.square(
+        vector_error(
+            reference=motion.body_lin_vel,
+            current=motion.robot_body_lin_vel,
+        )
     )
 
     return torch.exp(
@@ -154,12 +157,11 @@ def motion_global_body_angular_velocity_error_exp(
         command_name
     )
 
-    error = torch.sum(
-        torch.square(
-            motion.body_ang_vel
-            - motion.robot_body_ang_vel
-        ),
-        dim=-1,
+    error = torch.square(
+        vector_error(
+            reference=motion.body_ang_vel,
+            current=motion.robot_body_ang_vel,
+        )
     )
 
     return torch.exp(
@@ -178,18 +180,15 @@ def object_global_ref_position_error_exp(
         command_name
     )
 
-    error = torch.sum(
-        torch.square(
-            motion.cube_pos
-            - motion.simulator_cube_pos
-        ),
-        dim=-1,
+    error = vector_error(
+        reference=motion.cube_pos,
+        current=motion.simulator_cube_pos,
     )
 
     return torch.exp(
-        -error / (std * std)
+        -torch.square(error)
+        / (std * std)
     )
-
 
 def object_global_ref_orientation_error_exp(
     env: ManagerBasedRLEnv,
@@ -202,13 +201,13 @@ def object_global_ref_orientation_error_exp(
         command_name
     )
 
-    error = quat_error_magnitude(
-        motion.cube_quat,
-        motion.simulator_cube_quat,
-    ) ** 2
-
-    return torch.exp(
-        -error / (std * std)
+    error = torch.square(
+        orientation_error(
+            reference_quat=motion.cube_quat,
+            current_quat=motion.simulator_cube_quat,
+        )
     )
+
+    return torch.exp(-error / (std * std))
 
 
