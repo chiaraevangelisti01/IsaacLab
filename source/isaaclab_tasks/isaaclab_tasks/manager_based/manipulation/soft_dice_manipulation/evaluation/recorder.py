@@ -171,6 +171,15 @@ class SoftDiceEvaluationRecorder(RecorderTerm):
                     dtype=torch.float32,
                     device=env.device,
                 ),
+                "cube_position_delta_m": torch.zeros(
+                    (
+                        env.num_envs,
+                        self._max_episode_steps,
+                        3,
+                    ),
+                    dtype=torch.float32,
+                    device=env.device,
+                ),
             },
         }
 
@@ -262,6 +271,13 @@ class SoftDiceEvaluationRecorder(RecorderTerm):
         # --------------------------------------------------------------
         # Cube Cartesian trajectory tracking.
         # --------------------------------------------------------------
+        # Signed Cartesian displacement error:
+        # positive means the simulated cube lies in the
+        # positive axis direction relative to the reference.
+        cube_position_delta = (
+            self._motion.simulator_cube_pos
+            - self._motion.cube_pos
+        )
 
         cube_position_error = vector_error(
             reference=self._motion.cube_pos,
@@ -310,6 +326,12 @@ class SoftDiceEvaluationRecorder(RecorderTerm):
             step_idx,
             :,
         ] = hand_position_error
+        
+        trajectory["cube_position_delta_m"][
+            self._env_ids,
+            step_idx,
+            :,
+        ] = cube_position_delta
 
         trajectory["cube_position_error_m"][
             self._env_ids,

@@ -138,6 +138,10 @@ from isaaclab_tasks.manager_based.manipulation.soft_dice_manipulation.evaluation
 from isaaclab_tasks.manager_based.manipulation.soft_dice_manipulation.evaluation.trajectory_metrics import (
     compute_cartesian_trajectory_metrics,
 )
+from isaaclab_tasks.manager_based.manipulation.soft_dice_manipulation.evaluation.visualization import (
+    compute_main_metric_summary,
+    log_evaluation_visualizations,
+)
 
 # -----------------------------------------------------------------------------
 # Helpers
@@ -462,6 +466,7 @@ def main():
     )
 
     records: list[dict] = []
+    trajectory_records: list[dict] = []
 
     try:
        
@@ -570,6 +575,27 @@ def main():
                         }
                     )
                     trajectory = terminal["trajectory"]
+                    motion_frames = (
+                        trajectory[
+                            "motion_frame"
+                        ][
+                            env_id,
+                            :terminal_steps,
+                        ]
+                        .detach()
+                        .cpu()
+                    )
+
+                    cube_position_delta_m = (
+                        trajectory[
+                            "cube_position_delta_m"
+                        ][
+                            env_id,
+                            :terminal_steps,
+                        ]
+                        .detach()
+                        .cpu()
+                    )
 
                     body_position_error_m = (
                         trajectory[
@@ -685,6 +711,37 @@ def main():
                         }
                     )
 
+                    trajectory_records.append(
+                        {
+                            "episode_id":
+                                record["episode_id"],
+
+                            "motion_frame":
+                                motion_frames.numpy().copy(),
+
+                            "body_position_error_m":
+                                body_position_error_m.numpy().copy(),
+
+                            "body_orientation_error_rad":
+                                body_orientation_error_rad.numpy().copy(),
+
+                            "hand_position_error_m":
+                                hand_position_error_m.numpy().copy(),
+
+                            "cube_position_delta_m":
+                                cube_position_delta_m.numpy().copy(),
+
+                            "cube_position_error_m":
+                                cube_position_error_m.numpy().copy(),
+
+                            "cube_xy_position_error_m":
+                                cube_xy_position_error_m.numpy().copy(),
+
+                            "cube_orientation_error_rad":
+                                cube_orientation_error_rad.numpy().copy(),
+                        }
+                    )
+
                 episode_steps[done_ids] = 0
 
             policy_reset_owner.reset(dones)
@@ -724,6 +781,11 @@ def main():
             else 0.0
         ),
     }
+    summary.update(
+        compute_main_metric_summary(
+            records
+        )
+    )
 
     # -------------------------------------------------------------------------
     # Local outputs.
@@ -748,28 +810,16 @@ def main():
     # -------------------------------------------------------------------------
 
     for key, value in summary.items():
-        wb_run.summary[f"evaluation/{key}"] = value
+        wb_run.summary[
+            f"evaluation_summary/{key}"
+        ] = value
 
-    if records:
-        columns = list(records[0].keys())
 
-        table = wandb.Table(
-            columns=columns,
-            data=[
-                [
-                    row[column]
-                    for column in columns
-                ]
-                for row in records
-            ],
-        )
-
-        wb_run.log(
-            {
-                "evaluation/episodes":
-                    table
-            }
-        )
+    log_evaluation_visualizations(
+        run=wb_run,
+        records=records,
+        trajectory_records=trajectory_records,
+    )
 
     artifact = wandb.Artifact(
         name=(
