@@ -460,11 +460,13 @@ def main():
             with torch.inference_mode():
                 actions = policy(obs)
 
-                obs, _, dones, _ = env.step(actions)
+                obs, _, dones, extras = env.step(actions)
 
             episode_steps += 1
 
             done_ids = (dones > 0).nonzero(as_tuple=False).flatten()
+
+            terminal = extras["evaluation"]
 
             if done_ids.numel() > 0:
                 termination_manager = (env.unwrapped.termination_manager)
@@ -514,6 +516,39 @@ def main():
                         f"steps={steps} "
                         f"termination="
                         f"{termination}"
+                    )
+
+                    if not bool(terminal["terminal_valid"][env_id].item()):
+                        raise RuntimeError(f"Missing terminal snapshot for env {env_id}.")
+
+                    terminal_steps = int(terminal["episode_steps"][env_id].item())
+                    terminal_frame = int(terminal["motion_frame"][env_id].item())
+                    cube_pos = (terminal["cube_pos_e"][env_id].detach().cpu())
+                    cube_quat = (terminal["cube_quat_xyzw"][env_id].detach().cpu())
+                    reference_cube_pos = (terminal["reference_cube_pos_e"][env_id].detach().cpu())
+                    reference_cube_quat = (terminal["reference_cube_quat_xyzw"][env_id].detach().cpu())
+
+                    record.update(
+                        {
+                            "terminal_motion_frame": terminal_frame,
+
+                            "cube_x_m": float(cube_pos[0]),
+                            "cube_y_m": float(cube_pos[1]),
+                            "cube_z_m": float(cube_pos[2]),
+
+                            "cube_qx": float(cube_quat[0]),
+                            "cube_qy": float(cube_quat[1]),
+                            "cube_qz": float(cube_quat[2]),
+                            "cube_qw": float(cube_quat[3]),
+
+                            "reference_cube_x_m": float(reference_cube_pos[0]),
+                            "reference_cube_y_m": float(reference_cube_pos[1]),
+                            "reference_cube_z_m": float(reference_cube_pos[2]),
+                            "reference_cube_qx": float(reference_cube_quat[0]),
+                            "reference_cube_qy": float(reference_cube_quat[1]),
+                            "reference_cube_qz": float(reference_cube_quat[2]),
+                            "reference_cube_qw": float(reference_cube_quat[3]),
+                        }
                     )
 
                 episode_steps[done_ids] = 0

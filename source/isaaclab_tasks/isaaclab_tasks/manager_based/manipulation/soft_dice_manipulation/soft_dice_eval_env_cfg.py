@@ -3,6 +3,9 @@ from __future__ import annotations
 from isaaclab.utils.configclass import configclass
 
 from .soft_dice_env_cfg import SoftDiceTrackingEnvCfg
+from .evaluation.recorder import (
+    SoftDiceEvaluationRecordersCfg,
+)
 
 
 @configclass
@@ -16,7 +19,10 @@ class SoftDiceTrackingEvalEnvCfg(SoftDiceTrackingEnvCfg):
     early terminations so that every nominal rollout can be evaluated at
     the end of the reference trajectory.
     """
-
+    recorders: SoftDiceEvaluationRecordersCfg = (
+            SoftDiceEvaluationRecordersCfg()
+        )
+    
     def __post_init__(self):
         super().__post_init__()
 
@@ -50,3 +56,5 @@ class SoftDiceTrackingEvalEnvCfg(SoftDiceTrackingEnvCfg):
         # --------------------------------------------------------------
         self.terminations.ee_body_pos = None
         self.terminations.object_pose = None
+
+    
