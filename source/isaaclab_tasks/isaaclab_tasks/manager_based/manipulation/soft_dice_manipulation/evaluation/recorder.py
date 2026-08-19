@@ -12,9 +12,9 @@ from isaaclab.managers import (
 )
 from isaaclab.utils.configclass import configclass
 
+from ..utils.deformable_utils import compute_deformable_shape_metrics
 from ..utils.geometry_utils import orientation_error, vector_error, xy_position_error
 from ..utils.motion_utils import H1_HAND_REFERENCE_NAMES, H1_TRACKED_BODY_NAMES
-
 
 class SoftDiceEvaluationRecorder(RecorderTerm):
     """Capture terminal state and per-step evaluation data."""
@@ -174,6 +174,26 @@ class SoftDiceEvaluationRecorder(RecorderTerm):
                     dtype=torch.float32,
                     device=env.device,
                 ),
+                "deformation_rms_m": torch.zeros(
+                    (env.num_envs, self._max_episode_steps),
+                    dtype=torch.float32,
+                    device=env.device,
+                ),
+                "deformation_p95_m": torch.zeros(
+                    (env.num_envs, self._max_episode_steps),
+                    dtype=torch.float32,
+                    device=env.device,
+                ),
+                "deformation_max_m": torch.zeros(
+                    (env.num_envs, self._max_episode_steps),
+                    dtype=torch.float32,
+                    device=env.device,
+                ),
+                "relative_extent_change": torch.zeros(
+                    (env.num_envs, self._max_episode_steps, 3),
+                    dtype=torch.float32,
+                    device=env.device,
+                ),
             },
         }
 
@@ -276,6 +296,18 @@ class SoftDiceEvaluationRecorder(RecorderTerm):
         )
 
         # --------------------------------------------------------------
+        # Deformable-object shape metrics.
+        # --------------------------------------------------------------
+
+        reference_nodal_pos = self._motion.cube.data.default_nodal_state_w.torch[..., :3]
+        current_nodal_pos = self._motion.cube.data.nodal_pos_w.torch
+
+        deformation = compute_deformable_shape_metrics(
+            reference_nodal_pos=reference_nodal_pos,
+            current_nodal_pos=current_nodal_pos,
+        )
+
+        # --------------------------------------------------------------
         # Store current control step.
         # --------------------------------------------------------------
 
@@ -316,6 +348,22 @@ class SoftDiceEvaluationRecorder(RecorderTerm):
         trajectory["action_delta"][
             self._env_ids, step_idx, :
         ] = action_delta
+
+        trajectory["deformation_rms_m"][
+            self._env_ids, step_idx
+        ] = deformation["deformation_rms_m"]
+
+        trajectory["deformation_p95_m"][
+            self._env_ids, step_idx
+        ] = deformation["deformation_p95_m"]
+
+        trajectory["deformation_max_m"][
+            self._env_ids, step_idx
+        ] = deformation["deformation_max_m"]
+
+        trajectory["relative_extent_change"][
+            self._env_ids, step_idx, :
+        ] = deformation["relative_extent_change"]
 
         return None, None
 

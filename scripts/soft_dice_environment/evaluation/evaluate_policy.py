@@ -33,6 +33,12 @@ parser.add_argument("--motion_file", type=str, required=True)
 parser.add_argument("--num_envs", type=int, default=4)
 parser.add_argument("--num_episodes", type=int, default=8)
 parser.add_argument("--seed", type=int, default=42)
+parser.add_argument(
+    "--progress_interval",
+    type=int,
+    default=0,
+    help="Print evaluation progress every N control steps. Use 0 to disable.",
+)
 
 # Checkpoint location.
 parser.add_argument(
@@ -91,6 +97,7 @@ from isaaclab_tasks.manager_based.manipulation.soft_dice_manipulation.evaluation
     compute_cartesian_trajectory_metrics,
     compute_control_quality_metrics,
     compute_terminal_cube_pose_metrics,
+    compute_deformation_metrics,
 )
 from isaaclab_tasks.manager_based.manipulation.soft_dice_manipulation.evaluation.visualization import (
     compute_main_metric_summary,
@@ -169,7 +176,6 @@ def write_results(
         )
 
     return csv_path, json_path
-
 
 # -----------------------------------------------------------------------------
 # Main
@@ -331,6 +337,8 @@ def main():
     # -------------------------------------------------------------------------
     # Evaluation loop.
     # -------------------------------------------------------------------------
+    motion = env.unwrapped.command_manager.get_term("motion")
+    evaluation_step = 0
 
     obs = env.get_observations()
 
@@ -356,6 +364,17 @@ def main():
                 obs, _, dones, extras = env.step(actions)
 
             episode_steps += 1
+            evaluation_step += 1
+
+            if (
+                args_cli.progress_interval > 0
+                and evaluation_step % args_cli.progress_interval == 0
+            ):
+                print(
+                    f"[EVAL PROGRESS] "
+                    f"step={evaluation_step} "
+                    f"motion_frame={int(motion.frame_idx[0].item())}"
+                )
 
             done_ids = (dones > 0).nonzero(as_tuple=False).flatten()
             terminal = extras["evaluation"]
@@ -363,24 +382,14 @@ def main():
             if done_ids.numel() > 0:
                 termination_manager = env.unwrapped.termination_manager
 
-                motion_finished = (
-                    termination_manager.get_term("motion_finished")
-                    .detach()
-                    .clone()
-                )
-                hard_timeout = (
-                    termination_manager.get_term("time_out")
-                    .detach()
-                    .clone()
-                )
 
                 for env_id_tensor in done_ids:
                     if len(records) >= args_cli.num_episodes:
                         break
 
                     env_id = int(env_id_tensor.item())
-                    finished = bool(motion_finished[env_id].item())
-                    timed_out = bool(hard_timeout[env_id].item())
+                    finished = bool(terminal["motion_finished"][env_id].item())
+                    timed_out = bool(terminal["time_out"][env_id].item())  
 
                     if finished:
                         termination = "motion_finished"
@@ -524,6 +533,34 @@ def main():
                         .cpu()
                     )
 
+                    #---------------------------------------------
+                    # Deformation buffers 
+                    #-----------------------------------------------
+
+                    deformation_rms_m = (
+                        trajectory["deformation_rms_m"][env_id, :terminal_steps]
+                        .detach()
+                        .cpu()
+                    )
+
+                    deformation_p95_m = (
+                        trajectory["deformation_p95_m"][env_id, :terminal_steps]
+                        .detach()
+                        .cpu()
+                    )
+
+                    deformation_max_m = (
+                        trajectory["deformation_max_m"][env_id, :terminal_steps]
+                        .detach()
+                        .cpu()
+                    )
+
+                    relative_extent_change = (
+                        trajectory["relative_extent_change"][env_id, :terminal_steps]
+                        .detach()
+                        .cpu()
+                    )
+                    
                     # ---------------------------------------------------------
                     # Cartesian trajectory metrics.
                     # ---------------------------------------------------------
@@ -580,48 +617,44 @@ def main():
                     )
 
                     # ---------------------------------------------------------
-                    # Raw per-frame data for visualization.
+                    # Deformation metrics.
                     # ---------------------------------------------------------
 
-                    joint_torque_rms_nm = torch.sqrt(
-                        torch.mean(joint_torque_nm.square(), dim=-1)
+                    deformation_metrics = compute_deformation_metrics(
+                        deformation_rms_m=deformation_rms_m,
+                        deformation_p95_m=deformation_p95_m,
+                        deformation_max_m=deformation_max_m,
+                        relative_extent_change=relative_extent_change,
                     )
-                    action_delta_rms = torch.sqrt(
-                        torch.mean(action_delta.square(), dim=-1)
+
+                    record.update(
+                        {
+                            key: float(value.item())
+                            for key, value in deformation_metrics.items()
+                        }
                     )
+
+                    # ---------------------------------------------------------
+                    # Raw per-frame data for visualization.
+                    # ---------------------------------------------------------
 
                     trajectory_records.append(
                         {
                             "episode_id": record["episode_id"],
                             "motion_frame": motion_frames.numpy().copy(),
-
-                            "body_position_error_m":
-                                body_position_error_m.numpy().copy(),
-
-                            "body_orientation_error_rad":
-                                body_orientation_error_rad.numpy().copy(),
-
-                            "hand_position_error_m":
-                                hand_position_error_m.numpy().copy(),
-
-                            "cube_position_delta_m":
-                                cube_position_delta_m.numpy().copy(),
-
-                            "cube_position_error_m":
-                                cube_position_error_m.numpy().copy(),
-
-                            "cube_xy_position_error_m":
-                                cube_xy_position_error_m.numpy().copy(),
-
-                            "cube_orientation_error_rad":
-                                cube_orientation_error_rad.numpy().copy(),
-
-                            "joint_torque_nm":
-                                joint_torque_nm.numpy().copy(),
-
-                            "action_delta":
-                                action_delta.numpy().copy(),
-
+                            "body_position_error_m": body_position_error_m.numpy().copy(),
+                            "body_orientation_error_rad": body_orientation_error_rad.numpy().copy(),
+                            "hand_position_error_m": hand_position_error_m.numpy().copy(),
+                            "cube_position_delta_m": cube_position_delta_m.numpy().copy(),
+                            "cube_position_error_m": cube_position_error_m.numpy().copy(),
+                            "cube_xy_position_error_m": cube_xy_position_error_m.numpy().copy(),
+                            "cube_orientation_error_rad": cube_orientation_error_rad.numpy().copy(),
+                            "joint_torque_nm": joint_torque_nm.numpy().copy(),
+                            "action_delta": action_delta.numpy().copy(),
+                            "deformation_rms_m": deformation_rms_m.numpy().copy(),
+                            "deformation_p95_m": deformation_p95_m.numpy().copy(),
+                            "deformation_max_m": deformation_max_m.numpy().copy(),
+                            "relative_extent_change": relative_extent_change.numpy().copy(),
                         }
                     )
 

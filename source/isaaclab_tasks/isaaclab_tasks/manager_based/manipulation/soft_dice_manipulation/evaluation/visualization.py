@@ -11,6 +11,7 @@ import numpy as np
 import wandb
 
 from ..utils.motion_utils import H1_HAND_REFERENCE_NAMES, H1_TRACKED_BODY_NAMES
+from ..utils.deformable_utils import _compute_rest_deformation_reference
 
 
 # -----------------------------------------------------------------------------
@@ -25,7 +26,10 @@ _DISPLAY_METRICS = [
     ("Body position RMSE", "body_position_rmse_m", 100.0, "cm"),
     ("Body orientation RMSE", "body_orientation_rmse_deg", 1.0, "deg"),
     ("Hand position RMSE", "hand_position_rmse_m", 100.0, "cm"),
-]
+    ("Mean deformation RMS","deformation_rms_mean_m",1000.0,"mm"),
+    ("Peak deformation RMS","deformation_rms_peak_m",1000.0,"mm"),
+    ("Peak deformation P95","deformation_p95_peak_m",1000.0,"mm"),
+    ]
 
 
 def _pretty_name(name: str) -> str:
@@ -116,6 +120,7 @@ def _make_episode_table(records: list[dict]) -> wandb.Table:
             record["episode_id"],
             record["termination"],
             record["duration_s"],
+            bool(record["final_top_face_correct"]),
             100.0 * record["final_xy_position_error_m"],
             record["final_orientation_error_deg"],
             100.0 * record["cube_xy_position_rmse_m"],
@@ -123,7 +128,6 @@ def _make_episode_table(records: list[dict]) -> wandb.Table:
             100.0 * record["body_position_rmse_m"],
             record["body_orientation_rmse_deg"],
             100.0 * record["hand_position_rmse_m"],
-            bool(record["final_top_face_correct"]),
         ]
         for record in records
     ]
@@ -588,21 +592,43 @@ def _plot_final_xy_scatter(records: list[dict]):
 # Combined diagnostic.
 # -----------------------------------------------------------------------------
 
-def _plot_hand_cube_torque_diagnostic(
+def _plot_hand_cube_deformation_torque_diagnostic(
     trajectory_records: list[dict],
     joint_names: list[str],
 ):
     hand_frames, hand_mean, hand_std = _aggregate_by_frame(
-        trajectory_records, "hand_position_error_m"
+        trajectory_records,
+        "hand_position_error_m",
     )
     cube_frames, cube_delta_mean, cube_delta_std = _aggregate_by_frame(
-        trajectory_records, "cube_position_delta_m"
+        trajectory_records,
+        "cube_position_delta_m",
     )
     ori_frames, ori_mean, ori_std = _aggregate_by_frame(
-        trajectory_records, "cube_orientation_error_rad"
+        trajectory_records,
+        "cube_orientation_error_rad",
+    )
+    deformation_frames, deformation_rms_mean, deformation_rms_std = (
+        _aggregate_by_frame(
+            trajectory_records,
+            "deformation_rms_m",
+        )
+    )
+    p95_frames, deformation_p95_mean, deformation_p95_std = (
+        _aggregate_by_frame(
+            trajectory_records,
+            "deformation_p95_m",
+        )
     )
     torque_frames, torque_mean, torque_std = _aggregate_by_frame(
-        trajectory_records, "joint_torque_nm"
+        trajectory_records,
+        "joint_torque_nm",
+    )
+
+    # Resting deformation reference from the initial settled part
+    # of the current evaluation trajectory.
+    rest = _compute_rest_deformation_reference(
+        trajectory_records,
     )
 
     hand_mean_cm = 100.0 * np.mean(hand_mean, axis=-1)
@@ -614,8 +640,29 @@ def _plot_hand_cube_torque_diagnostic(
     ori_mean_deg = np.degrees(ori_mean)
     ori_std_deg = np.degrees(ori_std)
 
-    fig = plt.figure(figsize=(15, 18))
-    grid = fig.add_gridspec(6, 3)
+    deformation_rms_mean_mm = 1000.0 * deformation_rms_mean
+    deformation_rms_std_mm = 1000.0 * deformation_rms_std
+
+    deformation_p95_mean_mm = 1000.0 * deformation_p95_mean
+    deformation_p95_std_mm = 1000.0 * deformation_p95_std
+
+    rest_rms_mm = 1000.0 * rest["rms_m"]
+    rest_p95_mm = 1000.0 * rest["p95_m"]
+
+    fig = plt.figure(figsize=(15, 20))
+    grid = fig.add_gridspec(
+        7,
+        3,
+        height_ratios=[
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.2,
+            1.2,
+            1.2,
+        ],
+    )
 
     # ------------------------------------------------------------------
     # Hand tracking.
@@ -623,7 +670,11 @@ def _plot_hand_cube_torque_diagnostic(
 
     ax = fig.add_subplot(grid[0, :])
 
-    line = ax.plot(hand_frames, hand_mean_cm)[0]
+    line = ax.plot(
+        hand_frames,
+        hand_mean_cm,
+    )[0]
+
     ax.fill_between(
         hand_frames,
         hand_mean_cm - hand_std_cm,
@@ -633,7 +684,9 @@ def _plot_hand_cube_torque_diagnostic(
     )
 
     ax.set_ylabel("Hand error [cm]")
-    ax.set_title("Hand / cube / torque diagnostic")
+    ax.set_title(
+        "Hand / cube / deformation / torque diagnostic"
+    )
 
     # ------------------------------------------------------------------
     # Cube X/Y tracking.
@@ -642,7 +695,12 @@ def _plot_hand_cube_torque_diagnostic(
     ax = fig.add_subplot(grid[1, :])
 
     for i, label in enumerate(("X", "Y")):
-        line = ax.plot(cube_frames, cube_delta_mean_cm[:, i], label=label)[0]
+        line = ax.plot(
+            cube_frames,
+            cube_delta_mean_cm[:, i],
+            label=label,
+        )[0]
+
         ax.fill_between(
             cube_frames,
             cube_delta_mean_cm[:, i] - cube_delta_std_cm[:, i],
@@ -651,7 +709,11 @@ def _plot_hand_cube_torque_diagnostic(
             color=line.get_color(),
         )
 
-    ax.axhline(0.0, linewidth=0.8, linestyle="--")
+    ax.axhline(
+        0.0,
+        linewidth=0.8,
+        linestyle="--",
+    )
     ax.set_ylabel("Cube error [cm]")
     ax.legend()
 
@@ -661,7 +723,11 @@ def _plot_hand_cube_torque_diagnostic(
 
     ax = fig.add_subplot(grid[2, :])
 
-    line = ax.plot(ori_frames, ori_mean_deg)[0]
+    line = ax.plot(
+        ori_frames,
+        ori_mean_deg,
+    )[0]
+
     ax.fill_between(
         ori_frames,
         ori_mean_deg - ori_std_deg,
@@ -673,20 +739,79 @@ def _plot_hand_cube_torque_diagnostic(
     ax.set_ylabel("Cube orientation error [deg]")
 
     # ------------------------------------------------------------------
-    # Per-joint torque.
+    # Deformation.
     # ------------------------------------------------------------------
 
+    ax = fig.add_subplot(grid[3, :])
+
+    line = ax.plot(
+        deformation_frames,
+        deformation_rms_mean_mm,
+        label="RMS",
+    )[0]
+
+    ax.fill_between(
+        deformation_frames,
+        deformation_rms_mean_mm - deformation_rms_std_mm,
+        deformation_rms_mean_mm + deformation_rms_std_mm,
+        alpha=0.15,
+        color=line.get_color(),
+    )
+
+    line = ax.plot(
+        p95_frames,
+        deformation_p95_mean_mm,
+        label="P95",
+    )[0]
+
+    ax.fill_between(
+        p95_frames,
+        deformation_p95_mean_mm - deformation_p95_std_mm,
+        deformation_p95_mean_mm + deformation_p95_std_mm,
+        alpha=0.15,
+        color=line.get_color(),
+    )
+
+    ax.axhline(
+        rest_rms_mm,
+        linewidth=0.8,
+        linestyle="--",
+        label="Rest RMS",
+    )
+
+    ax.axhline(
+        rest_p95_mm,
+        linewidth=0.8,
+        linestyle=":",
+        label="Rest P95",
+    )
+
+    ax.set_ylabel("Deformation [mm]")
+    ax.legend(
+        ncol=4,
+        fontsize=8,
+    )
+
+    # ------------------------------------------------------------------
+    # Per-joint approximate applied torque.
+    # ------------------------------------------------------------------
 
     for i, joint_name in enumerate(joint_names):
-        row = 3 + i // 3
+        row = 4 + i // 3
         col = i % 3
 
-        ax = fig.add_subplot(grid[row, col])
+        ax = fig.add_subplot(
+            grid[row, col],
+        )
 
         mean = torque_mean[:, i]
         std = torque_std[:, i]
 
-        line = ax.plot(torque_frames, mean)[0]
+        line = ax.plot(
+            torque_frames,
+            mean,
+        )[0]
+
         ax.fill_between(
             torque_frames,
             mean - std,
@@ -695,14 +820,152 @@ def _plot_hand_cube_torque_diagnostic(
             color=line.get_color(),
         )
 
-        ax.axhline(0.0, linewidth=0.8, linestyle="--")
-        ax.set_title(_pretty_name(joint_name))
+        ax.axhline(
+            0.0,
+            linewidth=0.8,
+            linestyle="--",
+        )
+
+        ax.set_title(
+            _pretty_name(joint_name)
+        )
         ax.set_ylabel("Torque [Nm]")
         ax.set_xlabel("Motion frame")
 
     fig.tight_layout()
+
     return fig
 
+# -----------------------------------------------------------------------------
+# Deformable-object shape.
+# -----------------------------------------------------------------------------
+
+def _plot_deformation(
+    trajectory_records: list[dict],
+):
+    frames, rms_mean, rms_std = _aggregate_by_frame(
+        trajectory_records,
+        "deformation_rms_m",
+    )
+    p95_frames, p95_mean, p95_std = _aggregate_by_frame(
+        trajectory_records,
+        "deformation_p95_m",
+    )
+    max_frames, max_mean, max_std = _aggregate_by_frame(
+        trajectory_records,
+        "deformation_max_m",
+    )
+    extent_frames, extent_mean, extent_std = _aggregate_by_frame(
+        trajectory_records,
+        "relative_extent_change",
+    )
+    rest = _compute_rest_deformation_reference(
+        trajectory_records,
+    )
+
+
+    rms_mean_mm = 1000.0 * rms_mean
+    rms_std_mm = 1000.0 * rms_std
+    p95_mean_mm = 1000.0 * p95_mean
+    p95_std_mm = 1000.0 * p95_std
+    max_mean_mm = 1000.0 * max_mean
+    max_std_mm = 1000.0 * max_std
+
+    extent_mean_pct = 100.0 * extent_mean
+    extent_std_pct = 100.0 * extent_std
+
+    rest_rms_mm = 1000.0 * rest["rms_m"]
+    rest_p95_mm = 1000.0 * rest["p95_m"]
+    rest_extent_pct = 100.0 * rest["extent_change"]
+
+    fig, axes = plt.subplots(
+        2,
+        1,
+        figsize=(11, 8),
+        sharex=True,
+    )
+
+    # ------------------------------------------------------------------
+    # Rigid-motion-removed nodal deformation.
+    # ------------------------------------------------------------------
+
+    for frame_values, mean, std, label in (
+        (frames, rms_mean_mm, rms_std_mm, "RMS"),
+        (p95_frames, p95_mean_mm, p95_std_mm, "P95"),
+        (max_frames, max_mean_mm, max_std_mm, "Max"),
+    ):
+        line = axes[0].plot(
+            frame_values,
+            mean,
+            label=label,
+        )[0]
+
+        axes[0].fill_between(
+            frame_values,
+            mean - std,
+            mean + std,
+            alpha=0.15,
+            color=line.get_color(),
+        )
+
+    axes[0].axhline(
+        rest_rms_mm,
+        linewidth=1.0,
+        linestyle="--",
+        label="Rest RMS",
+    )
+    axes[0].axhline(
+        rest_p95_mm,
+        linewidth=1.0,
+        linestyle=":",
+        label="Rest P95",
+    )
+
+    axes[0].set_title("Deformable-object shape")
+    axes[0].set_ylabel("Deformation [mm]")
+    axes[0].legend(ncol=5, fontsize=8)
+
+    # ------------------------------------------------------------------
+    # Material-frame extent change.
+    # ------------------------------------------------------------------
+
+    axis_labels = ("X", "Y", "Z")
+
+    for axis, label in enumerate(axis_labels):
+        line = axes[1].plot(
+            extent_frames,
+            extent_mean_pct[:, axis],
+            label=label,
+        )[0]
+
+        axes[1].fill_between(
+            extent_frames,
+            extent_mean_pct[:, axis] - extent_std_pct[:, axis],
+            extent_mean_pct[:, axis] + extent_std_pct[:, axis],
+            alpha=0.15,
+            color=line.get_color(),
+        )
+
+        axes[1].axhline(
+            rest_extent_pct[axis],
+            linewidth=0.8,
+            linestyle=":",
+            color=line.get_color(),
+        )
+
+    axes[1].axhline(
+        0.0,
+        linewidth=0.8,
+        linestyle="--",
+    )
+
+    axes[1].set_ylabel("Relative extent change [%]")
+    axes[1].set_xlabel("Motion frame")
+    axes[1].legend()
+
+    fig.tight_layout()
+
+    return fig
 
 # -----------------------------------------------------------------------------
 # Public W&B logging entry point.
@@ -727,32 +990,17 @@ def log_evaluation_visualizations(
     episode_table = _make_episode_table(records)
     aggregate_table = _make_aggregate_table(records)
     termination_chart = _make_termination_chart(records)
-
     cube_tracking_fig = _plot_cube_tracking(trajectory_records)
     final_pose_fig = _plot_final_pose_components(records)
     final_xy_fig = _plot_final_xy_scatter(records)
-
     body_tracking_fig = _plot_body_tracking(trajectory_records)
     hand_tracking_fig = _plot_hand_tracking(trajectory_records)
     body_rmse_fig = _plot_per_body_rmse(records)
-
-    joint_torque_fig = _plot_joint_torques(
-        trajectory_records,
-        joint_names,
-    )
-    action_smoothness_fig = _plot_joint_action_smoothness(
-        trajectory_records,
-        joint_names,
-    )
-    control_summary_fig = _plot_per_joint_control_metrics(
-        records,
-        joint_names,
-    )
-
-    diagnostic_fig = _plot_hand_cube_torque_diagnostic(
-        trajectory_records,
-        joint_names,
-    )
+    joint_torque_fig = _plot_joint_torques(trajectory_records,joint_names)
+    action_smoothness_fig = _plot_joint_action_smoothness(trajectory_records,joint_names)
+    control_summary_fig = _plot_per_joint_control_metrics(records,joint_names)
+    deformation_fig = _plot_deformation(trajectory_records,)
+    diagnostic_fig = _plot_hand_cube_deformation_torque_diagnostic(trajectory_records,joint_names)
 
     run.log(
         {
@@ -773,17 +1021,14 @@ def log_evaluation_visualizations(
 
             # Control.
             "evaluation_control/joint_torques": wandb.Image(joint_torque_fig),
-            "evaluation_control/action_smoothness": wandb.Image(
-                action_smoothness_fig
-            ),
-            "evaluation_control/per_joint_summary": wandb.Image(
-                control_summary_fig
-            ),
+            "evaluation_control/action_smoothness": wandb.Image(action_smoothness_fig),
+            "evaluation_control/per_joint_summary": wandb.Image(control_summary_fig),
+
+            # Deformation.
+            "evaluation_deformation/shape": wandb.Image(deformation_fig),
 
             # Combined diagnostic.
-            "evaluation_diagnostics/hand_cube_torque": wandb.Image(
-                diagnostic_fig
-            ),
+            "evaluation_diagnostics/hand_cube_deformation_torque": wandb.Image(diagnostic_fig),
         }
     )
 
@@ -797,6 +1042,7 @@ def log_evaluation_visualizations(
         joint_torque_fig,
         action_smoothness_fig,
         control_summary_fig,
+        deformation_fig,
         diagnostic_fig,
     ]
 
@@ -834,6 +1080,22 @@ def log_comparison_timeseries(
     _, action_delta_mean, _ = _aggregate_by_frame(
         trajectory_records, "action_delta"
     )
+    _, deformation_rms, _ = _aggregate_by_frame(
+        trajectory_records,
+        "deformation_rms_m",
+    )
+    _, deformation_p95, _ = _aggregate_by_frame(
+        trajectory_records,
+        "deformation_p95_m",
+    )
+    _, deformation_max, _ = _aggregate_by_frame(
+        trajectory_records,
+        "deformation_max_m",
+    )
+    _, extent_change, _ = _aggregate_by_frame(
+        trajectory_records,
+        "relative_extent_change",
+    )
 
     run.define_metric("evaluation_frame")
     run.define_metric(
@@ -846,6 +1108,10 @@ def log_comparison_timeseries(
     )
     run.define_metric(
         "evaluation_action_delta/*",
+        step_metric="evaluation_frame",
+    )
+    run.define_metric(
+        "evaluation_deformation/*",
         step_metric="evaluation_frame",
     )
 
@@ -870,6 +1136,23 @@ def log_comparison_timeseries(
 
             "evaluation_comparison/body_orientation_error_deg":
                 float(np.degrees(np.mean(body_orientation[index]))),
+            "evaluation_deformation/rms_mm":
+                float(1000.0 * deformation_rms[index]),
+
+            "evaluation_deformation/p95_mm":
+                float(1000.0 * deformation_p95[index]),
+
+            "evaluation_deformation/max_mm":
+                float(1000.0 * deformation_max[index]),
+
+            "evaluation_deformation/extent_x_pct":
+                float(100.0 * extent_change[index, 0]),
+
+            "evaluation_deformation/extent_y_pct":
+                float(100.0 * extent_change[index, 1]),
+
+            "evaluation_deformation/extent_z_pct":
+                float(100.0 * extent_change[index, 2]),
         }
 
         for joint_idx, joint_name in enumerate(joint_names):
