@@ -51,6 +51,22 @@ H1_TRACKING_ACTION_SCALE = build_joint_action_scale(
     scale_factor=0.25,
 )
 
+# Experimental action-scale override for low-torque H1 joints.
+# Keep the physical actuator gains/limits unchanged; only modify the
+# mapping from normalized policy action to joint-position target.
+# H1_TRACKING_ACTION_SCALE.update(
+#     {
+#         "left_shoulder_pitch": 0.18,
+#         "left_shoulder_roll": 0.18,
+#         "left_shoulder_yaw": 0.18,
+#         "left_elbow": 0.18,
+#         "right_shoulder_pitch": 0.18,
+#         "right_shoulder_roll": 0.18,
+#         "right_shoulder_yaw": 0.18,
+#         "right_elbow": 0.18,
+#     }
+# )
+
 
 def make_deformable_cube_cfg(
     prim_path: str,
@@ -376,6 +392,22 @@ class EventCfg:
         },
     )
 
+    randomize_cube_material = EventTerm(
+        func=mdp.randomize_deformable_material,
+        mode="reset",
+        params={
+            "asset_name": "cube",
+            "youngs_modulus_range": (
+                1.0e4,
+                1.6e4,
+            ),
+            "poissons_ratio_range": (
+                0.30,
+                0.40,
+            ),
+        },
+    )
+
     # --------------------------------------------------------------
     # Episode reset.
     # --------------------------------------------------------------
@@ -399,6 +431,19 @@ class EventCfg:
                 joint_names=H1_TRACKING_JOINT_NAMES,
                 preserve_order=True,
             ),
+            "cube_position_range": {
+                "x": (-0.02, 0.02),
+                "y": (-0.02, 0.02),
+                "z": (0.0, 0.0),
+            },
+            "cube_orientation_range": {
+                "roll": (0.0, 0.0),
+                "pitch": (0.0, 0.0),
+                "yaw": (
+                    -np.deg2rad(10.0),
+                    np.deg2rad(10.0),
+                ),
+            },
         },
     )
 
