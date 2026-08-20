@@ -105,6 +105,14 @@ from isaaclab_tasks.manager_based.manipulation.soft_dice_manipulation.evaluation
     log_evaluation_visualizations,
 )
 
+from isaaclab_tasks.manager_based.manipulation.soft_dice_manipulation.evaluation.robustness import (
+    robustness_record_from_terminal,
+    select_condition_records,
+)
+
+from isaaclab_tasks.manager_based.manipulation.soft_dice_manipulation.evaluation.robustness_visualization import (
+    log_robustness_visualizations,
+)
 
 # -----------------------------------------------------------------------------
 # Helpers
@@ -253,7 +261,7 @@ def main():
 
     eval_config = {
         "task": args_cli.task,
-        "evaluation_suite": "nominal",
+        "evaluation_suite": "mixed_robustness",
         "training_experiment": experiment_name,
         "training_run": args_cli.load_run,
         "checkpoint": os.path.abspath(resume_path),
@@ -283,7 +291,7 @@ def main():
         mode=args_cli.wandb_mode,
         dir=output_dir,
         config=eval_config,
-        tags=["evaluation", "soft-dice", "nominal"],
+        tags=["evaluation", "soft-dice", "mixed_robustness"],
     )
 
     # -------------------------------------------------------------------------
@@ -423,7 +431,12 @@ def main():
                         raise RuntimeError(
                             f"Missing terminal snapshot for env {env_id}."
                         )
-
+                    record.update(
+                        robustness_record_from_terminal(
+                            terminal=terminal,
+                            env_id=env_id,
+                        )
+                    )
                     terminal_steps = int(
                         terminal["episode_steps"][env_id].item()
                     )
@@ -665,9 +678,24 @@ def main():
     finally:
         env.close()
 
+    
+
     # -------------------------------------------------------------------------
     # Aggregate results.
     # -------------------------------------------------------------------------
+
+    nominal_records, nominal_trajectory_records = (
+        select_condition_records(
+            records=records,
+            trajectory_records=trajectory_records,
+            condition="nominal",
+        )
+    )
+
+    if not nominal_records:
+        raise RuntimeError(
+            "Mixed evaluation produced no nominal episodes."
+        )
 
     durations = [row["duration_s"] for row in records]
     completed = sum(row["motion_finished"] for row in records)
@@ -683,7 +711,11 @@ def main():
         ),
     }
 
-    summary.update(compute_main_metric_summary(records))
+    summary.update(
+        compute_main_metric_summary(
+            nominal_records
+        )
+    )
 
     # -------------------------------------------------------------------------
     # Local outputs.
@@ -707,17 +739,21 @@ def main():
 
     log_evaluation_visualizations(
         run=wb_run,
-        records=records,
-        trajectory_records=trajectory_records,
+        records=nominal_records,
+        trajectory_records=nominal_trajectory_records,
         joint_names=controlled_joint_names,
     )
 
     log_comparison_timeseries(
         run=wb_run,
-        trajectory_records=trajectory_records,
+        trajectory_records=nominal_trajectory_records,
         joint_names=controlled_joint_names,
     )
 
+    log_robustness_visualizations(
+        run=wb_run,
+        records=records,
+    )
 
     artifact = wandb.Artifact(
         name=f"evaluation-results-{wb_run.id}",

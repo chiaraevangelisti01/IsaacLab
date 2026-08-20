@@ -15,6 +15,10 @@ from isaaclab.utils.configclass import configclass
 from ..utils.deformable_utils import compute_deformable_shape_metrics
 from ..utils.geometry_utils import orientation_error, vector_error, xy_position_error
 from ..utils.motion_utils import H1_HAND_REFERENCE_NAMES, H1_TRACKED_BODY_NAMES
+from .robustness import (
+    initialize_robustness_terminal_buffers,
+    snapshot_robustness_terminal,
+)
 
 class SoftDiceEvaluationRecorder(RecorderTerm):
     """Capture terminal state and per-step evaluation data."""
@@ -196,6 +200,10 @@ class SoftDiceEvaluationRecorder(RecorderTerm):
                 ),
             },
         }
+        initialize_robustness_terminal_buffers(
+            env,
+            env.extras["evaluation"],
+        )
 
     def record_post_step(self) -> tuple[None, None]:
         """Record evaluation quantities for the current control step."""
@@ -419,6 +427,12 @@ class SoftDiceEvaluationRecorder(RecorderTerm):
         output["time_out"][env_ids_t] = termination_manager.get_term(
             "time_out"
         )[env_ids_t]
+
+        snapshot_robustness_terminal(
+            env=self._env,
+            output=output,
+            env_ids=env_ids_t,
+        )
 
         return None, None
 

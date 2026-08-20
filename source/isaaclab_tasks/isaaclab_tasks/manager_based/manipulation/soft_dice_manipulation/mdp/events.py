@@ -9,6 +9,7 @@ import numpy as np
 import isaaclab.utils.math as math_utils
 
 from isaaclab.managers import SceneEntityCfg
+from ..utils.event_utils import get_randomization_buffers
 
 if TYPE_CHECKING:
     from isaaclab.assets import Articulation
@@ -67,6 +68,8 @@ def reset_to_motion_start(
     tracking_asset_cfg: SceneEntityCfg | None = None,
     cube_position_range: dict[str, tuple[float, float]] | None = None,
     cube_orientation_range: dict[str, tuple[float, float]] | None = None,
+    cube_position_offset: torch.Tensor | None = None,
+    cube_orientation_offset: torch.Tensor | None = None,
 ):
     """Reset root, joints, and the deformable dice to the demonstrated start state."""
 
@@ -138,23 +141,86 @@ def reset_to_motion_start(
     desired_pos_e = motion.start_cube_pos(env_ids).clone()
     desired_quat = motion.start_cube_quat(env_ids).clone()
 
-    cube_position_offset = _sample_axis_ranges(
-        ranges=cube_position_range,
-        axis_names=("x", "y", "z"),
-        num_samples=env_ids.numel(),
-        device=env.device,
-    )
+    if (
+        cube_position_range is not None
+        and cube_position_offset is not None
+    ):
+        raise ValueError(
+            "Specify either cube_position_range or "
+            "cube_position_offset, not both."
+        )
+
+    if cube_position_offset is None:
+        cube_position_offset = _sample_axis_ranges(
+            ranges=cube_position_range,
+            axis_names=("x", "y", "z"),
+            num_samples=env_ids.numel(),
+            device=env.device,
+        )
+    else:
+        cube_position_offset = torch.as_tensor(
+            cube_position_offset,
+            dtype=torch.float32,
+            device=env.device,
+        )
+
+        if cube_position_offset.shape != (
+            env_ids.numel(),
+            3,
+        ):
+            raise ValueError(
+                "cube_position_offset must have shape "
+                f"({env_ids.numel()}, 3), got "
+                f"{tuple(cube_position_offset.shape)}."
+            )
 
     desired_pos_e += cube_position_offset
 
-    cube_orientation_offset = _sample_axis_ranges(
-        ranges=cube_orientation_range,
-        axis_names=("roll", "pitch", "yaw"),
-        num_samples=env_ids.numel(),
-        device=env.device,
-    )
 
-    if cube_orientation_range is not None:
+    if (
+        cube_orientation_range is not None
+        and cube_orientation_offset is not None
+    ):
+        raise ValueError(
+            "Specify either cube_orientation_range or "
+            "cube_orientation_offset, not both."
+        )
+
+    if cube_orientation_offset is None:
+        cube_orientation_offset = _sample_axis_ranges(
+            ranges=cube_orientation_range,
+            axis_names=("roll", "pitch", "yaw"),
+            num_samples=env_ids.numel(),
+            device=env.device,
+        )
+    else:
+        cube_orientation_offset = torch.as_tensor(
+            cube_orientation_offset,
+            dtype=torch.float32,
+            device=env.device,
+        )
+
+        if cube_orientation_offset.shape != (
+            env_ids.numel(),
+            3,
+        ):
+            raise ValueError(
+                "cube_orientation_offset must have shape "
+                f"({env_ids.numel()}, 3), got "
+                f"{tuple(cube_orientation_offset.shape)}."
+            )
+
+    randomization = get_randomization_buffers(env)
+
+    randomization["cube_position_offset_m"][
+        env_ids
+    ] = cube_position_offset
+
+    randomization["cube_yaw_offset_rad"][
+        env_ids
+    ] = cube_orientation_offset[:, 2]
+
+    if torch.any(cube_orientation_offset != 0.0):
         delta_quat = math_utils.quat_from_euler_xyz(
             cube_orientation_offset[:, 0],
             cube_orientation_offset[:, 1],
@@ -324,6 +390,8 @@ def randomize_deformable_material(
 
     env_ids = _env_ids_tensor(env, env_ids)
 
+    randomization = get_randomization_buffers(env)
+
     if env_ids.numel() == 0:
         return
 
@@ -388,6 +456,10 @@ def randomize_deformable_material(
             env.device,
         )
 
+        randomization["youngs_modulus_pa"][
+            env_ids
+        ] = sampled[:, 0]
+
         youngs_modulus_np[material_ids_np] = (
             sampled.detach()
             .cpu()
@@ -432,6 +504,10 @@ def randomize_deformable_material(
             (env_ids.numel(), 1),
             env.device,
         )
+
+        randomization["poissons_ratio"][
+            env_ids
+        ] = sampled[:, 0]
 
         poissons_ratio_np[material_ids_np] = (
             sampled.detach()
