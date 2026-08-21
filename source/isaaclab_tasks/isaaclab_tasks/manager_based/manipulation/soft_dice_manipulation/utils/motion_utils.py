@@ -354,176 +354,89 @@ def load_motion_file(path: str):
         body_quat_w,
     )
 
-def _resample_linear(
-    values: np.ndarray,
-    source_fps: float,
-    target_times: np.ndarray,
-) -> np.ndarray:
-    """Linearly resample uniformly sampled vector data."""
+def load_tracking_motion_file(path: str):
+    """Load a fully converted motion suitable for RL tracking."""
 
-    source_coord = target_times * float(source_fps)
+    path = Path(path)
 
-    idx0 = np.floor(source_coord).astype(np.int64)
-    idx0 = np.clip(idx0, 0, values.shape[0] - 1)
+    if path.suffix != ".npz":
+        raise ValueError(f"Tracking motions must be converted .npz files: {path}")
 
-    idx1 = np.minimum(idx0 + 1, values.shape[0] - 1)
+    required_keys = {
+        "fps",
+        "joint_pos",
+        "joint_vel",
+        "body_names",
+        "body_pos_w",
+        "body_quat_w",
+        "body_lin_vel_w",
+        "body_ang_vel_w",
+        "object_pos_w",
+        "object_quat_w",
+    }
 
-    alpha = (source_coord - idx0).astype(np.float32)[:, None]
+    with np.load(path, allow_pickle=False) as data:
+        missing = required_keys - set(data.files)
+        if missing:
+            raise ValueError(
+                f"Tracking motion {path} is not a complete converted trajectory. "
+                f"Missing fields: {sorted(missing)}"
+            )
+
+        body_lin_vel_w = np.asarray(data["body_lin_vel_w"], dtype=np.float32)
+        body_ang_vel_w = np.asarray(data["body_ang_vel_w"], dtype=np.float32)
+
+    (
+        robot_joint_qpos,
+        robot_joint_qvel,
+        fps,
+        root_qpos,
+        object_qpos,
+        body_names,
+        body_pos_w,
+        body_quat_w,
+    ) = load_motion_file(str(path))
+
+    if robot_joint_qvel is None:
+        raise ValueError(f"Tracking motion has no joint velocities: {path}")
+
+    if root_qpos is None or object_qpos is None:
+        raise ValueError(f"Tracking motion has no root/object reference: {path}")
+
+    if body_names is None or body_pos_w is None or body_quat_w is None:
+        raise ValueError(f"Tracking motion has no Cartesian body reference: {path}")
+
+    expected_velocity_shape = (robot_joint_qpos.shape[0], len(body_names), 3)
+
+    if body_lin_vel_w.shape != expected_velocity_shape:
+        raise ValueError(
+            f"Expected body_lin_vel_w shape {expected_velocity_shape}, "
+            f"got {body_lin_vel_w.shape} in {path}"
+        )
+
+    if body_ang_vel_w.shape != expected_velocity_shape:
+        raise ValueError(
+            f"Expected body_ang_vel_w shape {expected_velocity_shape}, "
+            f"got {body_ang_vel_w.shape} in {path}"
+        )
+
+    if not np.isfinite(body_lin_vel_w).all():
+        raise ValueError(f"body_lin_vel_w contains non-finite values: {path}")
+
+    if not np.isfinite(body_ang_vel_w).all():
+        raise ValueError(f"body_ang_vel_w contains non-finite values: {path}")
 
     return (
-        (1.0 - alpha) * values[idx0]
-        + alpha * values[idx1]
-    ).astype(np.float32)
-
-
-def _resample_quat_wxyz(
-    quats: np.ndarray,
-    source_fps: float,
-    target_times: np.ndarray,
-) -> np.ndarray:
-    """Resample WXYZ quaternions using shortest-path SLERP."""
-
-    q = np.asarray(quats, dtype=np.float64)
-
-    norms = np.linalg.norm(q, axis=-1, keepdims=True)
-    if np.any(norms < 1.0e-8):
-        raise ValueError("Cannot interpolate zero-norm quaternion.")
-
-    q = q / norms
-
-    source_coord = target_times * float(source_fps)
-
-    idx0 = np.floor(source_coord).astype(np.int64)
-    idx0 = np.clip(idx0, 0, q.shape[0] - 1)
-
-    idx1 = np.minimum(idx0 + 1, q.shape[0] - 1)
-
-    alpha = (source_coord - idx0)[:, None]
-
-    q0 = q[idx0]
-    q1 = q[idx1].copy()
-
-    # q and -q represent the same orientation.
-    # Flip q1 when necessary so SLERP follows the shortest path.
-    dot = np.sum(q0 * q1, axis=-1)
-
-    flip = dot < 0.0
-    q1[flip] *= -1.0
-    dot = np.abs(dot)
-
-    dot = np.clip(dot, -1.0, 1.0)
-
-    result = np.empty_like(q0)
-
-    # For very small rotations, normalized linear interpolation
-    # is numerically more stable than SLERP.
-    close = dot > 0.9995
-
-    if np.any(close):
-        result[close] = (
-            (1.0 - alpha[close]) * q0[close]
-            + alpha[close] * q1[close]
-        )
-
-    far = ~close
-
-    if np.any(far):
-        theta = np.arccos(dot[far])[:, None]
-        sin_theta = np.sin(theta)
-
-        w0 = np.sin((1.0 - alpha[far]) * theta) / sin_theta
-        w1 = np.sin(alpha[far] * theta) / sin_theta
-
-        result[far] = w0 * q0[far] + w1 * q1[far]
-
-    result /= np.linalg.norm(result, axis=-1, keepdims=True)
-
-    return result.astype(np.float32)
-
-
-def resample_motion_to_fps(
-    joint_qpos: np.ndarray,
-    source_fps: float,
-    target_fps: float,
-    root_qpos: np.ndarray | None = None,
-    object_qpos: np.ndarray | None = None,
-):
-    """Resample a Holosoma motion onto a fixed target time grid.
-
-    Joint positions and Cartesian positions use linear interpolation.
-    Root/object orientations use quaternion SLERP.
-    """
-
-    if source_fps <= 0.0:
-        raise ValueError("source_fps must be positive.")
-
-    if target_fps <= 0.0:
-        raise ValueError("target_fps must be positive.")
-
-    num_source_frames = joint_qpos.shape[0]
-
-    if num_source_frames == 0:
-        raise ValueError("Motion contains no frames.")
-
-    if root_qpos is not None and root_qpos.shape[0] != num_source_frames:
-        raise ValueError("root_qpos length does not match joint trajectory.")
-
-    if object_qpos is not None and object_qpos.shape[0] != num_source_frames:
-        raise ValueError("object_qpos length does not match joint trajectory.")
-
-    if num_source_frames == 1:
-        return (
-            joint_qpos.copy(),
-            None if root_qpos is None else root_qpos.copy(),
-            None if object_qpos is None else object_qpos.copy(),
-        )
-
-    duration_s = (num_source_frames - 1) / float(source_fps)
-
-    # Fixed target-rate grid:
-    # 0, 1/target_fps, 2/target_fps, ...
-    #
-    # We deliberately do not append a shorter final interval.
-    num_target_frames = (
-        int(np.floor(duration_s * target_fps + 1.0e-9)) + 1
-    )
-
-    target_times = (
-        np.arange(num_target_frames, dtype=np.float64)
-        / float(target_fps)
-    )
-
-    joint_qpos_resampled = _resample_linear(
-        np.asarray(joint_qpos, dtype=np.float32),
-        source_fps,
-        target_times,
-    )
-
-    def resample_pose(qpos):
-        if qpos is None:
-            return None
-
-        pos = _resample_linear(
-            qpos[:, 0:3],
-            source_fps,
-            target_times,
-        )
-
-        quat = _resample_quat_wxyz(
-            qpos[:, 3:7],
-            source_fps,
-            target_times,
-        )
-
-        return np.concatenate((pos, quat), axis=-1).astype(np.float32)
-
-    root_qpos_resampled = resample_pose(root_qpos)
-    object_qpos_resampled = resample_pose(object_qpos)
-
-    return (
-        joint_qpos_resampled,
-        root_qpos_resampled,
-        object_qpos_resampled,
+        robot_joint_qpos,
+        robot_joint_qvel,
+        fps,
+        root_qpos,
+        object_qpos,
+        body_names,
+        body_pos_w,
+        body_quat_w,
+        body_lin_vel_w,
+        body_ang_vel_w,
     )
 
 def _quat_norm_wxyz(q):
@@ -632,6 +545,20 @@ def desired_cube_pose_from_holosoma(
 
     return pos, quat_xyzw, dice_rel_root_local.astype(np.float32), root_pos, dice_pos
 
+def select_body_values(
+    body_names: list[str],
+    values: np.ndarray,
+    tracked_body_names: list[str],
+) -> np.ndarray:
+    """Select body-indexed values in a requested body-name order."""
+
+    missing = [name for name in tracked_body_names if name not in body_names]
+    if missing:
+        raise ValueError(f"Missing required body references: {missing}")
+
+    body_indices = [body_names.index(name) for name in tracked_body_names]
+    return values[:, body_indices, ...]
+
 def select_body_reference(
     body_names: list[str],
     body_pos_w: np.ndarray,
@@ -640,23 +567,11 @@ def select_body_reference(
 ):
     """Select Cartesian trajectories for requested bodies."""
 
-    body_indices = []
-
-    for name in tracked_body_names:
-        if name not in body_names:
-            raise ValueError(
-                f"Body '{name}' not found in Holosoma trajectory. "
-                f"Available bodies: {body_names}"
-            )
-
-        body_indices.append(
-            body_names.index(name)
-        )
-
     return (
-        body_pos_w[:, body_indices, :],
-        body_quat_w[:, body_indices, :],
+        select_body_values(body_names, body_pos_w, tracked_body_names),
+        select_body_values(body_names, body_quat_w, tracked_body_names),
     )
+
 
 def transform_body_reference_to_fixed_root(
     body_pos_w: np.ndarray,
@@ -731,3 +646,49 @@ def transform_body_reference_to_fixed_root(
             )
 
     return out_pos, out_quat
+
+def transform_vector_reference_to_fixed_root(
+    vector_w: np.ndarray,
+    root_qpos: np.ndarray,
+    fixed_root_quat_xyzw: np.ndarray,
+) -> np.ndarray:
+    """Rotate world-frame vectors from the Holosoma root alignment to the fixed Isaac root."""
+
+    out = np.empty_like(vector_w, dtype=np.float32)
+    R_fixed_root = _quat_xyzw_to_rotmat(fixed_root_quat_xyzw)
+
+    for frame in range(vector_w.shape[0]):
+        R_root = _quat_wxyz_to_rotmat(root_qpos[frame, 3:7])
+        R_align = R_fixed_root @ R_root.T
+        out[frame] = vector_w[frame] @ R_align.T
+
+    return out
+
+def resolve_motion_paths(
+    motion_file: str = "",
+    motion_dir: str = "",
+    motion_pattern: str = "*.npz",
+) -> list[Path]:
+    """Resolve either one motion file or a sorted directory-backed motion pool."""
+
+    if bool(motion_file) == bool(motion_dir):
+        raise ValueError("Configure exactly one of motion_file or motion_dir.")
+
+    if motion_file:
+        path = Path(motion_file).expanduser().resolve()
+        if not path.is_file():
+            raise FileNotFoundError(f"Motion file does not exist: {path}")
+        return [path]
+
+    motion_dir_path = Path(motion_dir).expanduser().resolve()
+    if not motion_dir_path.is_dir():
+        raise FileNotFoundError(f"Motion directory does not exist: {motion_dir_path}")
+
+    paths = sorted(path for path in motion_dir_path.glob(motion_pattern) if path.is_file())
+
+    if not paths:
+        raise FileNotFoundError(
+            f"No motion files matching {motion_pattern!r} found in {motion_dir_path}"
+        )
+
+    return paths

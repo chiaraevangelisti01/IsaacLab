@@ -78,6 +78,7 @@ def reset_to_motion_start(
         return
 
     motion: MotionCommand = env.command_manager.get_term(command_name)
+    motion.sample_motions(env_ids)
     robot = env.scene[robot_name]
     cube = env.scene[cube_name]
 

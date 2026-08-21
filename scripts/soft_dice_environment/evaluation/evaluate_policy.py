@@ -408,9 +408,13 @@ def main():
 
                     steps = int(episode_steps[env_id].item())
 
+                    motion_id = int(terminal["motion_id"][env_id].item())
+
                     record = {
                         "episode_id": len(records),
                         "env_id": env_id,
+                        "motion_id": motion_id,
+                        "motion_name": motion.motion_name(motion_id),
                         "seed": int(args_cli.seed),
                         "episode_steps": steps,
                         "duration_s": steps * float(env.unwrapped.step_dt),

@@ -24,7 +24,8 @@ from .utils.motion_utils import (
     CUSTOM_DICE_DEFORMABLE_USD,
     CUSTOM_DICE_SCALE,
     desired_cube_pose_from_holosoma,
-    load_motion_file,
+    load_tracking_motion_file,
+    resolve_motion_paths,
     validate_asset_paths,
 )
 
@@ -33,17 +34,17 @@ DEFAULT_TABLE_LENGTH = 0.80
 DEFAULT_TABLE_WIDTH = 1.20
 DEFAULT_GROUND_Z = 0.0
 
-H1_TRACKING_JOINT_NAMES = [
-    "torso",
-    "left_shoulder_pitch",
-    "left_shoulder_roll",
-    "left_shoulder_yaw",
-    "left_elbow",
-    "right_shoulder_pitch",
-    "right_shoulder_roll",
-    "right_shoulder_yaw",
-    "right_elbow",
-]
+# H1_TRACKING_JOINT_NAMES = [
+#     "torso",
+#     "left_shoulder_pitch",
+#     "left_shoulder_roll",
+#     "left_shoulder_yaw",
+#     "left_elbow",
+#     "right_shoulder_pitch",
+#     "right_shoulder_roll",
+#     "right_shoulder_yaw",
+#     "right_elbow",
+# ]
 
 H1_TRACKING_ACTION_SCALE = build_joint_action_scale(
     robot_cfg=H1_FIXED_CFG,
@@ -54,18 +55,18 @@ H1_TRACKING_ACTION_SCALE = build_joint_action_scale(
 # Experimental action-scale override for low-torque H1 joints.
 # Keep the physical actuator gains/limits unchanged; only modify the
 # mapping from normalized policy action to joint-position target.
-# H1_TRACKING_ACTION_SCALE.update(
-#     {
-#         "left_shoulder_pitch": 0.18,
-#         "left_shoulder_roll": 0.18,
-#         "left_shoulder_yaw": 0.18,
-#         "left_elbow": 0.18,
-#         "right_shoulder_pitch": 0.18,
-#         "right_shoulder_roll": 0.18,
-#         "right_shoulder_yaw": 0.18,
-#         "right_elbow": 0.18,
-#     }
-# )
+H1_TRACKING_ACTION_SCALE.update(
+    {
+        "left_shoulder_pitch": 0.18,
+        "left_shoulder_roll": 0.18,
+        "left_shoulder_yaw": 0.18,
+        "left_elbow": 0.18,
+        "right_shoulder_pitch": 0.18,
+        "right_shoulder_roll": 0.18,
+        "right_shoulder_yaw": 0.18,
+        "right_elbow": 0.18,
+    }
+)
 
 
 def make_deformable_cube_cfg(
@@ -598,7 +599,7 @@ class TerminationsCfg:
                 "left_elbow_link",
                 "right_elbow_link",
             ],
-            "include_hands": True,
+            "include_hands": True ,
         },
     )
 
@@ -649,43 +650,77 @@ class SoftDiceTrackingEnvCfg(ManagerBasedRLEnvCfg):
         self.viewer.lookat = (0.0, 0.0, 1.1)
 
     def configure_from_motion(self) -> None:
-        """Resolve scene layout from the selected trajectory before scene creation."""
+        """Resolve scene layout and timeout from the configured motion source."""
+
         validate_asset_paths()
 
-        motion_file = self.commands.motion.motion_file
-        if not motion_file:
-            raise ValueError(
-                "No motion file configured. For training pass e.g. "
-                "env.commands.motion.motion_file=/absolute/path/to/demo.npz"
-            )
+        motion_paths = resolve_motion_paths(
+            motion_file=self.commands.motion.motion_file,
+            motion_dir=self.commands.motion.motion_dir,
+            motion_pattern=self.commands.motion.motion_pattern,
+        )
 
-        _, _, fps, root_qpos, object_qpos, _,_,_, = load_motion_file(motion_file)
-
-        if root_qpos is None or object_qpos is None:
-            raise ValueError(
-                "Soft-dice tracking currently expects root + H1 + object qpos (33 columns)."
-            )
-
+        expected_fps = 1.0 / (float(self.decimation) * float(self.sim.dt))
         start_frame = int(self.commands.motion.start_frame)
-        if not 0 <= start_frame < root_qpos.shape[0]:
-            raise ValueError(f"start_frame={start_frame} outside the motion range.")
+        playback_speed = float(self.commands.motion.playback_speed)
+
+        if playback_speed <= 0.0:
+            raise ValueError("playback_speed must be > 0.")
 
         robot_pos = np.asarray(self.scene.robot.init_state.pos, dtype=np.float32)
         robot_quat = np.asarray(self.scene.robot.init_state.rot, dtype=np.float32)
 
-        cube_pos, _, *_ = desired_cube_pose_from_holosoma(
-            root_qpos,
-            object_qpos,
-            start_frame,
-            robot_pos,
-            robot_quat,
-        )
+        initial_cube_positions = []
+        max_duration = 0.0
 
+        for motion_path in motion_paths:
+            (
+                joint_qpos,
+                _,
+                fps,
+                root_qpos,
+                object_qpos,
+                _,
+                _,
+                _,
+                _,
+                _,
+            ) = load_tracking_motion_file(str(motion_path))
+
+            if not np.isclose(fps, expected_fps, rtol=0.0, atol=1.0e-6):
+                raise ValueError(
+                    f"Reference {motion_path} is {fps} Hz but the environment runs at "
+                    f"{expected_fps} Hz. Convert the motion to the correct output FPS first."
+                )
+
+            if not 0 <= start_frame < joint_qpos.shape[0]:
+                raise ValueError(
+                    f"start_frame={start_frame} outside [0, {joint_qpos.shape[0] - 1}] "
+                    f"for {motion_path}"
+                )
+
+            cube_pos, _, *_ = desired_cube_pose_from_holosoma(
+                root_qpos,
+                object_qpos,
+                start_frame,
+                robot_pos,
+                robot_quat,
+            )
+
+            initial_cube_positions.append(cube_pos)
+            remaining_frames = joint_qpos.shape[0] - start_frame
+            max_duration = max(
+                max_duration,
+                remaining_frames / (float(fps) * playback_speed),
+            )
+
+        cube_pos = np.asarray(initial_cube_positions[0], dtype=np.float32)
         self.scene.cube.init_state.pos = cube_pos.tolist()
 
         cube_height = float(self.cube_size) * float(CUSTOM_DICE_SCALE[2])
         cube_bottom_z = float(cube_pos[2] - cube_height / 2.0)
         table_thickness = cube_bottom_z - float(self.ground_z)
+
         if table_thickness <= 0.0:
             raise ValueError(f"Computed table thickness is not positive: {table_thickness}")
 
@@ -701,11 +736,8 @@ class SoftDiceTrackingEnvCfg(ManagerBasedRLEnvCfg):
             float(table_thickness),
         )
 
-        # Keep the hard timeout just beyond the trajectory duration.
-        remaining_frames = root_qpos.shape[0] - start_frame
-        duration = remaining_frames / (float(fps) * float(self.commands.motion.playback_speed))
         step_dt = float(self.decimation) * float(self.sim.dt)
-        self.episode_length_s = max(duration + step_dt, step_dt)
+        self.episode_length_s = max(max_duration + step_dt, step_dt)
 
     def validate_config(self):
         # Isaac Lab 3 beta2 invokes this after Hydra overrides are applied.

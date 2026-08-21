@@ -106,6 +106,11 @@ class SoftDiceEvaluationRecorder(RecorderTerm):
                 dtype=torch.bool,
                 device=env.device,
             ),
+            "motion_id": torch.zeros(
+                env.num_envs,
+                dtype=torch.long,
+                device=env.device,
+            ),
             "trajectory": {
                 "motion_frame": torch.full(
                     (env.num_envs, self._max_episode_steps),
@@ -427,6 +432,7 @@ class SoftDiceEvaluationRecorder(RecorderTerm):
         output["time_out"][env_ids_t] = termination_manager.get_term(
             "time_out"
         )[env_ids_t]
+        output["motion_id"][env_ids_t] = self._motion.motion_id[env_ids_t]
 
         snapshot_robustness_terminal(
             env=self._env,
