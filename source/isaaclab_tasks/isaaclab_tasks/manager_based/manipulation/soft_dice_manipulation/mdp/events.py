@@ -386,6 +386,7 @@ def randomize_deformable_material(
     asset_name: str = "cube",
     youngs_modulus_range: tuple[float, float] | None = None,
     poissons_ratio_range: tuple[float, float] | None = None,
+    dynamic_friction_range: tuple[float, float] | None = None,
 ):
     """Randomize deformable material properties independently per environment."""
 
@@ -527,3 +528,53 @@ def randomize_deformable_material(
             poissons_ratio_wp,
             material_ids_wp,
         )
+
+    # ------------------------------------------------------------------
+    # Dynamic friction.
+    # ------------------------------------------------------------------
+
+    if dynamic_friction_range is not None:
+        low, high = dynamic_friction_range
+
+        if low < 0.0 or high < low:
+            raise ValueError(
+                "Dynamic friction must satisfy "
+                f"0 <= low <= high. Got {dynamic_friction_range}."
+            )
+
+        dynamic_friction_wp = material_view.get_dynamic_friction()
+
+        dynamic_friction_np = (
+            dynamic_friction_wp.numpy()
+            .copy()
+            .astype(np.float32)
+        )
+
+        sampled = math_utils.sample_uniform(
+            low,
+            high,
+            (env_ids.numel(), 1),
+            env.device,
+        )
+
+        dynamic_friction_np[material_ids_np] = (
+            sampled.detach()
+            .cpu()
+            .numpy()
+            .astype(np.float32)
+        )
+
+        dynamic_friction_wp = wp.from_numpy(
+            dynamic_friction_np,
+            dtype=wp.float32,
+            device="cpu",
+        )
+
+        material_view.set_dynamic_friction(
+            dynamic_friction_wp,
+            material_ids_wp,
+        )
+
+        randomization["cube_dynamic_friction"][
+            env_ids
+        ] = sampled[:, 0]

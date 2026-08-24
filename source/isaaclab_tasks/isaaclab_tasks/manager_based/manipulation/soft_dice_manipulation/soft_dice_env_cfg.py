@@ -34,17 +34,17 @@ DEFAULT_TABLE_LENGTH = 0.80
 DEFAULT_TABLE_WIDTH = 1.20
 DEFAULT_GROUND_Z = 0.0
 
-# H1_TRACKING_JOINT_NAMES = [
-#     "torso",
-#     "left_shoulder_pitch",
-#     "left_shoulder_roll",
-#     "left_shoulder_yaw",
-#     "left_elbow",
-#     "right_shoulder_pitch",
-#     "right_shoulder_roll",
-#     "right_shoulder_yaw",
-#     "right_elbow",
-# ]
+H1_TRACKING_JOINT_NAMES = [
+    "torso",
+    "left_shoulder_pitch",
+    "left_shoulder_roll",
+    "left_shoulder_yaw",
+    "left_elbow",
+    "right_shoulder_pitch",
+    "right_shoulder_roll",
+    "right_shoulder_yaw",
+    "right_elbow",
+]
 
 H1_TRACKING_ACTION_SCALE = build_joint_action_scale(
     robot_cfg=H1_FIXED_CFG,
@@ -55,18 +55,18 @@ H1_TRACKING_ACTION_SCALE = build_joint_action_scale(
 # Experimental action-scale override for low-torque H1 joints.
 # Keep the physical actuator gains/limits unchanged; only modify the
 # mapping from normalized policy action to joint-position target.
-H1_TRACKING_ACTION_SCALE.update(
-    {
-        "left_shoulder_pitch": 0.18,
-        "left_shoulder_roll": 0.18,
-        "left_shoulder_yaw": 0.18,
-        "left_elbow": 0.18,
-        "right_shoulder_pitch": 0.18,
-        "right_shoulder_roll": 0.18,
-        "right_shoulder_yaw": 0.18,
-        "right_elbow": 0.18,
-    }
-)
+# H1_TRACKING_ACTION_SCALE.update(
+#     {
+#         "left_shoulder_pitch": 0.18,
+#         "left_shoulder_roll": 0.18,
+#         "left_shoulder_yaw": 0.18,
+#         "left_elbow": 0.18,
+#         "right_shoulder_pitch": 0.18,
+#         "right_shoulder_roll": 0.18,
+#         "right_shoulder_yaw": 0.18,
+#         "right_elbow": 0.18,
+#     }
+# )
 
 
 def make_deformable_cube_cfg(
@@ -87,8 +87,8 @@ def make_deformable_cube_cfg(
                 density=21.5,
                 poissons_ratio=0.37,
                 youngs_modulus=1.5e4,
-                static_friction=1.2,
-                dynamic_friction=0.8,
+                static_friction=1.4,
+                dynamic_friction=1.0,
                 elasticity_damping=0.02,
             ),
 
@@ -405,6 +405,10 @@ class EventCfg:
             "poissons_ratio_range": (
                 0.30,
                 0.40,
+            ),
+            "dynamic_friction_range": (
+                0.7,
+                1.3,
             ),
         },
     )

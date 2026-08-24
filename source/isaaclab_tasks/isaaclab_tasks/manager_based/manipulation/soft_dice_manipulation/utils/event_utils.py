@@ -41,6 +41,14 @@ def get_randomization_buffers(env):
             device=env.device,
         )
 
+    if "cube_dynamic_friction" not in buffers:
+        buffers["cube_dynamic_friction"] = torch.full(
+            (env.num_envs,),
+            float("nan"),
+            dtype=torch.float32,
+            device=env.device,
+        )
+
     return buffers
 
 def set_deformable_material_values(
