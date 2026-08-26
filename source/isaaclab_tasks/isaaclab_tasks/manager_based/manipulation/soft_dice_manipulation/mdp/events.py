@@ -70,6 +70,7 @@ def reset_to_motion_start(
     cube_orientation_range: dict[str, tuple[float, float]] | None = None,
     cube_position_offset: torch.Tensor | None = None,
     cube_orientation_offset: torch.Tensor | None = None,
+    sample_motion: bool = True,
 ):
     """Reset root, joints, and the deformable dice to the demonstrated start state."""
 
@@ -78,7 +79,8 @@ def reset_to_motion_start(
         return
 
     motion: MotionCommand = env.command_manager.get_term(command_name)
-    motion.sample_motions(env_ids)
+    if sample_motion:
+        motion.sample_motions(env_ids)
     robot = env.scene[robot_name]
     cube = env.scene[cube_name]
 

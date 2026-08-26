@@ -808,7 +808,46 @@ class MotionCommand(CommandTerm):
             motion_ids,
             minlength=self.num_motions,
         )
+        
+    def set_motion_by_name(
+        self,
+        motion_name: str,
+        env_ids: torch.Tensor | None = None,
+    ) -> None:
+        """Select a specific reference motion without resetting simulation state."""
 
+        if motion_name not in self.motion_names:
+            raise ValueError(
+                f"Unknown motion '{motion_name}'. "
+                f"Available motions: {self.motion_names}"
+            )
+
+        motion_id = self.motion_names.index(motion_name)
+
+        if env_ids is None:
+            env_ids = torch.arange(
+                self.num_envs,
+                dtype=torch.long,
+                device=self.device,
+            )
+        else:
+            env_ids = torch.as_tensor(
+                env_ids,
+                dtype=torch.long,
+                device=self.device,
+            ).reshape(-1)
+
+        motion_ids = torch.full(
+            (env_ids.numel(),),
+            motion_id,
+            dtype=torch.long,
+            device=self.device,
+        )
+
+        self._motion_id[env_ids] = motion_ids
+        self._frame_idx[env_ids] = self._start_frames[motion_ids]
+        self._motion_step[env_ids] = 0
+    
     def motion_name(self, motion_id: int) -> str:
         return self.motion_names[motion_id]
 
