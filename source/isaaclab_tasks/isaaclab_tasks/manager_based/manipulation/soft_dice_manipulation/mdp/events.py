@@ -212,7 +212,8 @@ def reset_to_motion_start(
                 f"({env_ids.numel()}, 3), got "
                 f"{tuple(cube_orientation_offset.shape)}."
             )
-
+    
+    
     randomization = get_randomization_buffers(env)
 
     randomization["cube_position_offset_m"][
@@ -256,6 +257,8 @@ def reset_to_motion_start(
     nodal_targets[..., 3] = 1.0
     cube.write_nodal_kinematic_target_to_sim_index(nodal_targets, env_ids=env_ids)
     cube.reset(env_ids)
+
+    motion._cached_cube_quat_step = -1
 
 def randomize_joint_default_pos(
     env: ManagerBasedRLEnv,

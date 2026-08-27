@@ -156,7 +156,9 @@ class MotionCommand(CommandTerm):
             dtype=torch.long,
             device=self.device,
         )
-        
+
+        self._cached_cube_quat = None
+        self._cached_cube_quat_step = -1
         # -------------------------------------------------------------------------
         # Episode tracking metrics
         # -------------------------------------------------------------------------
@@ -650,20 +652,23 @@ class MotionCommand(CommandTerm):
 
     @property
     def simulator_cube_quat(self) -> torch.Tensor:
-        """Current bulk orientation of the deformable dice in XYZW convention."""
+        """Current bulk orientation of the deformable dice."""
 
-        reference_nodal_pos = (
-            self.cube.data.default_nodal_state_w.torch[..., :3]
-        )
+        step = self._env.common_step_counter
 
-        current_nodal_pos = (
-            self.cube.data.nodal_pos_w.torch
-        )
+        if self._cached_cube_quat_step != step:
+            reference_nodal_pos = (
+                self.cube.data.default_nodal_state_w.torch[..., :3]
+            )
+            current_nodal_pos = self.cube.data.nodal_pos_w.torch
 
-        return estimate_deformable_orientation_kabsch(
-            reference_nodal_pos=reference_nodal_pos,
-            current_nodal_pos=current_nodal_pos,
-        )
+            self._cached_cube_quat = estimate_deformable_orientation_kabsch(
+                reference_nodal_pos=reference_nodal_pos,
+                current_nodal_pos=current_nodal_pos,
+            )
+            self._cached_cube_quat_step = step
+
+        return self._cached_cube_quat
 
     @property
     def finished(self) -> torch.Tensor:
