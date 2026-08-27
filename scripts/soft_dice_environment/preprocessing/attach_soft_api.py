@@ -91,8 +91,8 @@ INPUT_USD = (
 )
 
 OUTPUT_USD = (
-    "/home/chiara/git/IsaacLab_v3_test/"
-    "dice_superquadric_reduced_resolution.usd"
+    "/home/chiara/git/IsaacLab_v3_test/scripts/soft_dice_environment/models/"
+    "dice_superquadric_further_reduced7.usd"
 )
 
 
@@ -1682,7 +1682,7 @@ def main():
             "returned False."
         )
 
-    SIMULATION_HEX_RESOLUTION = 8
+    SIMULATION_HEX_RESOLUTION = 7
     root_prim = require_valid_prim(
         stage,
         ROOT_PATH,
