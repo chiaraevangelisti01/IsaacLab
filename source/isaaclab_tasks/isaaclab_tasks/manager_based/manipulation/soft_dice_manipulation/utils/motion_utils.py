@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import pickle
 from pathlib import Path
+import json
 
 import numpy as np
+import torch
 
 from isaaclab_tasks import ISAACLAB_TASKS_EXT_DIR
 
@@ -692,3 +694,129 @@ def resolve_motion_paths(
         )
 
     return paths
+
+def load_trajectory_phase_metadata(
+    metadata_file: str,
+    motion_paths: list[Path],
+    motion_lengths: torch.Tensor,
+    start_frames: torch.Tensor,
+    device: str,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Load and validate landing/release phases for a motion pool."""
+
+    metadata_path = Path(
+        metadata_file
+    ).expanduser()
+
+    if not metadata_path.is_file():
+        raise FileNotFoundError(
+            f"Trajectory phase metadata file does not exist: "
+            f"{metadata_path}"
+        )
+
+    with metadata_path.open("r") as f:
+        metadata = json.load(f)
+
+    if "motions" not in metadata:
+        raise ValueError(
+            f"{metadata_path} does not contain a 'motions' dictionary."
+        )
+
+    motion_metadata = metadata["motions"]
+
+    landing_start_phases = []
+    release_phases = []
+
+    for motion_id, motion_path in enumerate(
+        motion_paths
+    ):
+        key = motion_path.name
+
+        if key not in motion_metadata:
+            raise KeyError(
+                f"No phase metadata found for "
+                f"trajectory '{key}' in {metadata_path}."
+            )
+
+        entry = motion_metadata[key]
+
+        metadata_num_frames = int(
+            entry["num_frames"]
+        )
+
+        actual_num_frames = int(
+            motion_lengths[motion_id].item()
+        )
+
+        if metadata_num_frames != actual_num_frames:
+            raise ValueError(
+                f"{key}: metadata says "
+                f"{metadata_num_frames} frames, "
+                f"but loaded trajectory has "
+                f"{actual_num_frames}."
+            )
+
+        metadata_start_frame = int(
+            entry.get("start_frame", 0)
+        )
+
+        actual_start_frame = int(
+            start_frames[motion_id].item()
+        )
+
+        if metadata_start_frame != actual_start_frame:
+            raise ValueError(
+                f"{key}: phase metadata was computed with "
+                f"start_frame={metadata_start_frame}, "
+                f"but environment uses "
+                f"start_frame={actual_start_frame}."
+            )
+
+        if not bool(
+            entry.get("release_found", False)
+        ):
+            raise ValueError(
+                f"{key}: preprocessing did not "
+                "successfully detect a release."
+            )
+
+        landing_start = float(
+            entry["landing_start_phase"]
+        )
+
+        release = float(
+            entry["release_phase"]
+        )
+
+        if not (
+            0.0
+            <= landing_start
+            <= release
+            <= 1.0
+        ):
+            raise ValueError(
+                f"{key}: invalid phase interval: "
+                f"landing_start={landing_start}, "
+                f"release={release}."
+            )
+
+        landing_start_phases.append(
+            landing_start
+        )
+
+        release_phases.append(
+            release
+        )
+
+    return (
+        torch.tensor(
+            landing_start_phases,
+            dtype=torch.float32,
+            device=device,
+        ),
+        torch.tensor(
+            release_phases,
+            dtype=torch.float32,
+            device=device,
+        ),
+    )

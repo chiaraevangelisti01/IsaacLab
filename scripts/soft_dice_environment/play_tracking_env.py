@@ -100,7 +100,45 @@ def print_cube_state(env, cube, title="Cube state"):
             "m",
         )
 
+def disable_randomization_for_replay(env_cfg):
+    # ----------------------------------------------------------
+    # 1. Disable policy observation noise
+    # ----------------------------------------------------------
+    env_cfg.observations.policy.enable_corruption = False
 
+    # ----------------------------------------------------------
+    # 2. Disable startup domain randomization
+    # ----------------------------------------------------------
+    env_cfg.events.physics_material = None
+    env_cfg.events.add_joint_default_pos = None
+    env_cfg.events.base_com = None
+
+    # ----------------------------------------------------------
+    # 3. Disable deformable-cube material randomization
+    # ----------------------------------------------------------
+    env_cfg.events.randomize_cube_material = None
+
+    # ----------------------------------------------------------
+    # 4. KEEP reset_to_reference, but remove reset perturbations
+    # ----------------------------------------------------------
+    env_cfg.events.reset_to_reference.params["joint_position_range"] = (
+        0.0,
+        0.0,
+    )
+
+    env_cfg.events.reset_to_reference.params["cube_position_range"] = {
+        "x": (0.0, 0.0),
+        "y": (0.0, 0.0),
+        "z": (0.0, 0.0),
+    }
+
+    env_cfg.events.reset_to_reference.params["cube_orientation_range"] = {
+        "roll": (0.0, 0.0),
+        "pitch": (0.0, 0.0),
+        "yaw": (0.0, 0.0),
+    }
+
+    return env_cfg
 # -----------------------------------------------------------------------------
 # Main
 # -----------------------------------------------------------------------------
@@ -137,6 +175,8 @@ def main():
 
     # Reads everything above from cfg.
     cfg.configure_from_motion()
+
+    disable_randomization_for_replay(cfg)
 
     env = ManagerBasedRLEnv(cfg=cfg)
 

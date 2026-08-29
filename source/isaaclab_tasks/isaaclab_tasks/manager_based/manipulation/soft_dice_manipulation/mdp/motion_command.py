@@ -25,11 +25,13 @@ from ..utils.motion_utils import (
     HOLOSOMA_TO_ISAAC_INDICES,
     desired_cube_pose_from_holosoma,
     load_tracking_motion_file,
+    load_trajectory_phase_metadata,
     resolve_motion_paths,
     select_body_reference,
     select_body_values,
     transform_body_reference_to_fixed_root,
     transform_vector_reference_to_fixed_root,
+
 )
 
 from ..utils.deformable_utils import estimate_deformable_orientation_kabsch
@@ -126,6 +128,21 @@ class MotionCommand(CommandTerm):
             device=self.device,
         )
 
+        self._landing_start_phases = None
+        self._release_phases = None
+
+        if cfg.phase_metadata_file:
+            (
+                self._landing_start_phases,
+                self._release_phases,
+            ) = load_trajectory_phase_metadata(
+                metadata_file=cfg.phase_metadata_file,
+                motion_paths=self.motion_paths,
+                motion_lengths=self._motion_lengths,
+                start_frames=self._start_frames,
+                device=self.device,
+            )
+
         self.num_frames = int(self._motion_lengths.max().item())
         self._start_frame = int(cfg.start_frame)
 
@@ -159,6 +176,7 @@ class MotionCommand(CommandTerm):
 
         self._cached_cube_quat = None
         self._cached_cube_quat_step = -1
+
         # -------------------------------------------------------------------------
         # Episode tracking metrics
         # -------------------------------------------------------------------------
@@ -615,6 +633,26 @@ class MotionCommand(CommandTerm):
         return self._cube_quat_all[self._global_frame_idx()]
 
     @property
+    def final_cube_quat(
+        self,
+    ) -> torch.Tensor:
+        """Final demonstrated cube orientation for each active motion."""
+
+        final_global_idx = (
+            self._motion_offsets[
+                self._motion_id
+            ]
+            + self._motion_lengths[
+                self._motion_id
+            ]
+            - 1
+        )
+
+        return self._cube_quat_all[
+            final_global_idx
+        ]
+
+    @property
     def body_pos(self) -> torch.Tensor:
         return self._body_pos_all[self._global_frame_idx()]
 
@@ -767,6 +805,48 @@ class MotionCommand(CommandTerm):
             :, self._tracked_body_ids, :
         ]
 
+    @property
+    def phase(self) -> torch.Tensor:
+        motion_ids = self._motion_id
+
+        start_frames = self._start_frames[
+            motion_ids
+        ]
+
+        phase_length = (
+            self._motion_lengths[motion_ids]
+            - 1
+            - start_frames
+        ).clamp_min(1)
+
+        return (
+            self._frame_idx - start_frames
+        ).float() / phase_length.float()
+
+
+    @property
+    def landing_start_phase(self) -> torch.Tensor:
+        if self._landing_start_phases is None:
+            raise RuntimeError(
+                "No trajectory phase metadata loaded."
+            )
+
+        return self._landing_start_phases[
+            self._motion_id
+        ]
+
+
+    @property
+    def release_phase(self) -> torch.Tensor:
+        if self._release_phases is None:
+            raise RuntimeError(
+                "No trajectory phase metadata loaded."
+            )
+
+        return self._release_phases[
+            self._motion_id
+        ]
+
     def start_joint_pos(self, env_ids: torch.Tensor) -> torch.Tensor:
         return self._joint_pos_all[self._start_global_idx(env_ids)]
 
@@ -862,14 +942,8 @@ class MotionCommand(CommandTerm):
         # ------------------------------------------------------------------
 
         motion_ids = self._motion_id
-        start_frames = self._start_frames[motion_ids]
-        phase_length = (
-            self._motion_lengths[motion_ids] - 1 - start_frames
-        ).clamp_min(1)
 
-        self.metrics["phase"][:] = (
-            self._frame_idx - start_frames
-        ).float() / phase_length.float()
+        self.metrics["phase"][:] = self.phase
 
         self._motion_transition_count += torch.bincount(
             motion_ids,
@@ -1016,14 +1090,20 @@ class MotionCommandCfg(CommandTermCfg):
 
     class_type: type | str = "{DIR}.motion_command:MotionCommand"
 
-    # The command changes every environment step internally; it is not randomly resampled by time.
-    resampling_time_range: tuple[float, float] = (1.0e9, 1.0e9)
+    resampling_time_range: tuple[float, float] = (
+        1.0e9,
+        1.0e9,
+    )
 
     asset_name: str = "robot"
     cube_name: str = "cube"
+
     motion_file: str = ""
     motion_dir: str = ""
     motion_pattern: str = "*.npz"
+
+    phase_metadata_file: str = ""
+
     start_frame: int = 0
     playback_speed: float = 1.0
     loop: bool = False

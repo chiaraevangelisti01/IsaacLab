@@ -29,3 +29,20 @@ gym.register(
         ),
     },
 )
+
+
+gym.register(
+    id="Isaac-Soft-Dice-TaskAware-H1-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.soft_dice_task_aware_env_cfg:"
+            "SoftDiceTaskAwareEnvCfg"
+        ),
+        "rsl_rl_cfg_entry_point": (
+            f"{agents.__name__}.rsl_rl_ppo_cfg:"
+            "SoftDiceTrackingPPORunnerCfg"
+        ),
+    },
+)

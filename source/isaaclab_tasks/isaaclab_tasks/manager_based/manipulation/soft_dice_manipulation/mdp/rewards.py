@@ -5,11 +5,25 @@ from typing import TYPE_CHECKING
 import torch
 
 from isaaclab.managers import SceneEntityCfg
+
 from ..utils.geometry_utils import (
+    canonical_cube_orientation_error,
     orientation_error,
+    orientation_in_frame,
     vector_error,
 )
-from ..utils.motion_utils import H1_TRACKED_BODY_NAMES
+
+from ..utils.reward_utils import (
+    decreasing_phase_scale,
+    distance_to_xy_disk,
+    smooth_phase_blend,
+)
+
+from ..utils.motion_utils import (
+    H1_TRACKED_BODY_NAMES,
+)
+
+from .observations import object_pos_r0
 
 if TYPE_CHECKING:
     from isaaclab.assets import Articulation
@@ -211,3 +225,249 @@ def object_global_ref_orientation_error_exp(
     return torch.exp(-error / (std * std))
 
 
+###### Phase weighted rewards
+def object_phase_weighted_ref_position_error_exp(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    std: float,
+    final_reference_scale: float,
+) -> torch.Tensor:
+    """Track object reference position while gradually reducing its authority."""
+
+    motion: MotionCommand = (
+        env.command_manager.get_term(
+            command_name
+        )
+    )
+
+    reference_reward = (
+        object_global_ref_position_error_exp(
+            env=env,
+            command_name=command_name,
+            std=std,
+        )
+    )
+
+    scale = decreasing_phase_scale(
+        phase=motion.phase,
+        start_phase=motion.landing_start_phase,
+        end_phase=motion.release_phase,
+        final_scale=final_reference_scale,
+    )
+
+    return (
+        scale
+        * reference_reward
+    )
+
+
+def object_phase_weighted_ref_orientation_error_exp(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    std: float,
+    final_reference_scale: float,
+) -> torch.Tensor:
+    """Track object reference orientation while gradually reducing its authority."""
+
+    motion: MotionCommand = (
+        env.command_manager.get_term(
+            command_name
+        )
+    )
+
+    reference_reward = (
+        object_global_ref_orientation_error_exp(
+            env=env,
+            command_name=command_name,
+            std=std,
+        )
+    )
+
+    scale = decreasing_phase_scale(
+        phase=motion.phase,
+        start_phase=motion.landing_start_phase,
+        end_phase=motion.release_phase,
+        final_scale=final_reference_scale,
+    )
+
+    return (
+        scale
+        * reference_reward
+    )
+
+def landing_position_region_reward_exp(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    goal_xy: tuple[float, float],
+    radius: float,
+    std: float,
+) -> torch.Tensor:
+    """Reward placing the cube inside a canonical XY landing region.
+
+    The landing region is expressed in the fixed nominal robot-root
+    frame. All positions inside the disk receive the same spatial
+    reward.
+
+    The reward is phase gated:
+        - zero before landing_start,
+        - smoothly activated between landing_start and release,
+        - fully active after release.
+    """
+
+    motion: MotionCommand = (
+        env.command_manager.get_term(
+            command_name
+        )
+    )
+
+    # --------------------------------------------------------------
+    # Current cube position in the fixed nominal robot frame.
+    # --------------------------------------------------------------
+
+    cube_pos_r0 = object_pos_r0(
+        env=env,
+        command_name=command_name,
+    )
+
+    goal_xy_tensor = torch.as_tensor(
+        goal_xy,
+        dtype=cube_pos_r0.dtype,
+        device=cube_pos_r0.device,
+    )
+
+    # --------------------------------------------------------------
+    # Distance to the valid landing region.
+    #
+    # Inside the disk:
+    #     distance = 0
+    #
+    # Outside:
+    #     distance = distance_from_center - radius
+    # --------------------------------------------------------------
+
+    distance = distance_to_xy_disk(
+        position=cube_pos_r0,
+        center_xy=goal_xy_tensor,
+        radius=radius,
+    )
+
+    spatial_reward = torch.exp(
+        -torch.square(distance)
+        / (std * std)
+    )
+
+    # --------------------------------------------------------------
+    # Activate task objective as the demonstrated manipulation
+    # approaches its landing/release phase.
+    # --------------------------------------------------------------
+
+    alpha = smooth_phase_blend(
+        phase=motion.phase,
+        start_phase=motion.landing_start_phase,
+        end_phase=motion.release_phase,
+    )
+
+    return (
+        alpha
+        * spatial_reward
+    )
+
+def landing_orientation_reward_exp(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    std: float,
+) -> torch.Tensor:
+    """Reward the intended canonical final cube orientation.
+
+    The demonstrated final pose determines:
+        - final top face;
+        - nearest 90-degree yaw state.
+
+    The reward itself targets the exact canonical orientation,
+    not the imperfect demonstrated quaternion.
+    """
+
+    motion: MotionCommand = (
+        env.command_manager.get_term(
+            command_name
+        )
+    )
+
+    robot_quat_e = torch.as_tensor(
+        motion.robot.cfg.init_state.rot,
+        dtype=motion.simulator_cube_quat.dtype,
+        device=motion.simulator_cube_quat.device,
+    ).unsqueeze(
+        0
+    ).expand(
+        env.num_envs,
+        -1,
+    )
+
+    # ----------------------------------------------------------
+    # Put reference and simulated cube in the same fixed
+    # nominal robot frame.
+    # ----------------------------------------------------------
+
+    final_reference_quat_r0 = (
+        orientation_in_frame(
+            orientation=(
+                motion.final_cube_quat
+            ),
+            frame_orientation=(
+                robot_quat_e
+            ),
+        )
+    )
+
+    current_cube_quat_r0 = (
+        orientation_in_frame(
+            orientation=(
+                motion.simulator_cube_quat
+            ),
+            frame_orientation=(
+                robot_quat_e
+            ),
+        )
+    )
+
+    # ----------------------------------------------------------
+    # Desired orientation:
+    #
+    #   correct top face
+    #       +
+    #   nearest 0/90/180/270 yaw state
+    # ----------------------------------------------------------
+
+    error = (
+        canonical_cube_orientation_error(
+            reference_quat=(
+                final_reference_quat_r0
+            ),
+            current_quat=(
+                current_cube_quat_r0
+            ),
+        )
+    )
+
+    orientation_reward = torch.exp(
+        -torch.square(
+            error
+        )
+        / (std * std)
+    )
+
+    alpha = smooth_phase_blend(
+        phase=motion.phase,
+        start_phase=(
+            motion.landing_start_phase
+        ),
+        end_phase=(
+            motion.release_phase
+        ),
+    )
+
+    return (
+        alpha
+        * orientation_reward
+    )

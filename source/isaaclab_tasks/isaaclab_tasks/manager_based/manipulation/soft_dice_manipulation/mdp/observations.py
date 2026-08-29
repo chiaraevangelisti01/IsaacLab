@@ -12,6 +12,9 @@ from isaaclab.utils.math import (
 )
 
 from ..utils.motion_utils import H1_TRACKED_BODY_NAMES
+from ..utils.geometry_utils import (
+    position_in_frame,
+)
 
 if TYPE_CHECKING:
     from isaaclab.assets import Articulation
@@ -223,3 +226,42 @@ def object_lin_vel_b(
         motion.robot_body_quat[:, torso_idx],
         motion.simulator_cube_lin_vel,
     )
+
+def object_pos_r0(
+    env: ManagerBasedRLEnv,
+    command_name: str = "motion",
+) -> torch.Tensor:
+    """Current cube centroid in the nominal robot-root frame."""
+
+    motion: MotionCommand = (
+        env.command_manager.get_term(
+            command_name
+        )
+    )
+
+    cube_pos_e = motion.simulator_cube_pos
+
+    robot_pos_e = torch.as_tensor(
+        motion.robot.cfg.init_state.pos,
+        dtype=cube_pos_e.dtype,
+        device=cube_pos_e.device,
+    ).unsqueeze(0).expand(
+        env.num_envs,
+        -1,
+    )
+
+    robot_quat_e = torch.as_tensor(
+        motion.robot.cfg.init_state.rot,
+        dtype=cube_pos_e.dtype,
+        device=cube_pos_e.device,
+    ).unsqueeze(0).expand(
+        env.num_envs,
+        -1,
+    )
+    object_pos_r0 = position_in_frame(
+        position=cube_pos_e,
+        frame_position=robot_pos_e,
+        frame_orientation=robot_quat_e,
+    )
+
+    return object_pos_r0

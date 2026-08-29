@@ -1,15 +1,20 @@
 from __future__ import annotations
 
+from itertools import (
+    permutations,
+    product,
+)
+
 import torch
 
 from isaaclab.utils.math import (
     euler_xyz_from_quat,
+    matrix_from_quat,
     quat_apply_inverse,
     quat_error_magnitude,
     quat_inv,
     quat_mul,
 )
-
 
 def vector_error(
     reference: torch.Tensor,
@@ -102,3 +107,339 @@ def same_top_face(
     """Whether current and reference have the same physical cube face on top."""
 
     return top_face_index(reference_quat) == top_face_index(current_quat)
+
+def position_in_frame(
+    position: torch.Tensor,
+    frame_position: torch.Tensor,
+    frame_orientation: torch.Tensor,
+) -> torch.Tensor:
+    """Express a position in a given reference frame."""
+
+    return quat_apply_inverse(
+        frame_orientation,
+        position - frame_position,
+    )
+
+def orientation_in_frame(
+    orientation: torch.Tensor,
+    frame_orientation: torch.Tensor,
+) -> torch.Tensor:
+    """Express an orientation relative to a reference frame.
+
+    Args:
+        orientation:
+            Object orientation in the parent frame, XYZW.
+
+        frame_orientation:
+            Reference-frame orientation in the same parent frame,
+            XYZW.
+
+    Returns:
+        Object orientation expressed in the reference frame.
+    """
+
+    return quat_mul(
+        quat_inv(frame_orientation),
+        orientation,
+    )
+
+def _build_cube_canonical_rotations() -> torch.Tensor:
+    """Construct the 24 proper axis-aligned rotations of a cube."""
+
+    rotations = []
+
+    for permutation in permutations(
+        range(3)
+    ):
+        for signs in product(
+            (-1.0, 1.0),
+            repeat=3,
+        ):
+            rotation = torch.zeros(
+                (3, 3),
+                dtype=torch.float32,
+            )
+
+            for column, (
+                axis,
+                sign,
+            ) in enumerate(
+                zip(
+                    permutation,
+                    signs,
+                )
+            ):
+                rotation[
+                    axis,
+                    column,
+                ] = sign
+
+            # Keep proper rotations only:
+            # det(R) = +1.
+            if torch.det(rotation) > 0.0:
+                rotations.append(
+                    rotation
+                )
+
+    result = torch.stack(
+        rotations,
+        dim=0,
+    )
+
+    if result.shape != (
+        24,
+        3,
+        3,
+    ):
+        raise RuntimeError(
+            "Expected 24 canonical cube rotations, "
+            f"got {result.shape}."
+        )
+
+    return result
+
+
+def _top_face_index_from_matrix(
+    rotation: torch.Tensor,
+) -> torch.Tensor:
+    """Return the local cube face pointing upward.
+
+    Face convention matches top_face_index():
+
+        0 -> +X
+        1 -> -X
+        2 -> +Y
+        3 -> -Y
+        4 -> +Z
+        5 -> -Z
+    """
+
+    world_up = torch.zeros(
+        rotation.shape[:-2] + (3,),
+        dtype=rotation.dtype,
+        device=rotation.device,
+    )
+
+    world_up[..., 2] = 1.0
+
+    # Express world-up in the local cube frame.
+    local_up = (
+        rotation.transpose(
+            -1,
+            -2,
+        )
+        @ world_up.unsqueeze(-1)
+    ).squeeze(-1)
+
+    axis = torch.argmax(
+        torch.abs(local_up),
+        dim=-1,
+    )
+
+    signed_component = torch.gather(
+        local_up,
+        dim=-1,
+        index=axis.unsqueeze(-1),
+    ).squeeze(-1)
+
+    negative = (
+        signed_component < 0.0
+    ).long()
+
+    return (
+        2 * axis
+        + negative
+    )
+
+_CUBE_CANONICAL_ROTATIONS_CPU = (
+    _build_cube_canonical_rotations()
+)
+
+_CUBE_CANONICAL_TOP_FACES_CPU = (
+    _top_face_index_from_matrix(
+        _CUBE_CANONICAL_ROTATIONS_CPU
+    )
+)
+
+_CUBE_CANONICAL_CACHE = {}
+
+
+def _cube_canonical_data(
+    device: torch.device,
+    dtype: torch.dtype,
+) -> tuple[
+    torch.Tensor,
+    torch.Tensor,
+]:
+    """Return canonical rotations and top-face ids on a device."""
+
+    key = (
+        str(device),
+        dtype,
+    )
+
+    if key not in _CUBE_CANONICAL_CACHE:
+        rotations = (
+            _CUBE_CANONICAL_ROTATIONS_CPU.to(
+                device=device,
+                dtype=dtype,
+            )
+        )
+
+        top_faces = (
+            _CUBE_CANONICAL_TOP_FACES_CPU.to(
+                device=device,
+            )
+        )
+
+        _CUBE_CANONICAL_CACHE[
+            key
+        ] = (
+            rotations,
+            top_faces,
+        )
+
+    return _CUBE_CANONICAL_CACHE[
+        key
+    ]
+
+def canonical_cube_target_from_reference(
+    reference_quat: torch.Tensor,
+) -> tuple[
+    torch.Tensor,
+    torch.Tensor,
+]:
+    """Choose the desired exact canonical cube orientation.
+
+    Selection is performed in two steps:
+
+    1. Determine the intended top face from the final reference.
+    2. Among the four canonical orientations with that top face,
+       choose the one closest to the final reference.
+
+    The four candidates differ only by 90-degree rotations around
+    the vertical axis.
+
+    Args:
+        reference_quat:
+            Final demonstrated orientation, XYZW, shape (..., 4).
+
+    Returns:
+        desired_matrix:
+            Exact canonical target rotation, shape (..., 3, 3).
+
+        desired_top_face:
+            Desired top-face index, shape (...).
+    """
+
+    reference_matrix = (
+        matrix_from_quat(
+            reference_quat
+        )
+    )
+
+    desired_top_face = (
+        top_face_index(
+            reference_quat
+        )
+    )
+
+    (
+        canonical_rotations,
+        canonical_top_faces,
+    ) = _cube_canonical_data(
+        device=reference_matrix.device,
+        dtype=reference_matrix.dtype,
+    )
+
+    # Similarity between reference and every canonical orientation.
+    scores = torch.einsum(
+        "...ij,kij->...k",
+        reference_matrix,
+        canonical_rotations,
+    )
+
+    # Only allow canonical orientations that preserve
+    # the desired top face.
+    valid_top_face = (
+        canonical_top_faces.view(
+            *((1,) * desired_top_face.ndim),
+            24,
+        )
+        == desired_top_face.unsqueeze(-1)
+    )
+
+    scores = torch.where(
+        valid_top_face,
+        scores,
+        torch.full_like(
+            scores,
+            -torch.inf,
+        ),
+    )
+
+    target_index = torch.argmax(
+        scores,
+        dim=-1,
+    )
+
+    desired_matrix = (
+        canonical_rotations[
+            target_index
+        ]
+    )
+
+    return (
+        desired_matrix,
+        desired_top_face,
+    )
+
+def canonical_cube_orientation_error(
+    reference_quat: torch.Tensor,
+    current_quat: torch.Tensor,
+) -> torch.Tensor:
+    """Orientation error to the canonical target defined by the reference.
+
+    The final reference determines:
+        - which face should be on top;
+        - which 90-degree yaw state is intended.
+
+    The actual target is perfectly axis aligned.
+    """
+
+    (
+        desired_matrix,
+        _,
+    ) = canonical_cube_target_from_reference(
+        reference_quat
+    )
+
+    current_matrix = matrix_from_quat(
+        current_quat
+    )
+
+    relative_matrix = (
+        desired_matrix.transpose(
+            -1,
+            -2,
+        )
+        @ current_matrix
+    )
+
+    trace = (
+        relative_matrix[..., 0, 0]
+        + relative_matrix[..., 1, 1]
+        + relative_matrix[..., 2, 2]
+    )
+
+    cosine = (
+        (trace - 1.0)
+        / 2.0
+    ).clamp(
+        -1.0,
+        1.0,
+    )
+
+    return torch.acos(
+        cosine
+    )
