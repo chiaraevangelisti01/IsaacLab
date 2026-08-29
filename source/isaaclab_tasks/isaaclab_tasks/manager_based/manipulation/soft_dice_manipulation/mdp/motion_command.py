@@ -128,12 +128,14 @@ class MotionCommand(CommandTerm):
             device=self.device,
         )
 
-        self._landing_start_phases = None
+        self._position_landing_start_phases = None
+        self._orientation_landing_start_phases = None
         self._release_phases = None
 
         if cfg.phase_metadata_file:
             (
-                self._landing_start_phases,
+                self._position_landing_start_phases,
+                self._orientation_landing_start_phases,
                 self._release_phases,
             ) = load_trajectory_phase_metadata(
                 metadata_file=cfg.phase_metadata_file,
@@ -825,15 +827,45 @@ class MotionCommand(CommandTerm):
 
 
     @property
-    def landing_start_phase(self) -> torch.Tensor:
-        if self._landing_start_phases is None:
+    def position_landing_start_phase(
+        self,
+    ) -> torch.Tensor:
+        """Start phase for the position task-objective transition."""
+
+        if (
+            self._position_landing_start_phases
+            is None
+        ):
             raise RuntimeError(
                 "No trajectory phase metadata loaded."
             )
 
-        return self._landing_start_phases[
-            self._motion_id
-        ]
+        return (
+            self._position_landing_start_phases[
+                self._motion_id
+            ]
+        )
+
+
+    @property
+    def orientation_landing_start_phase(
+        self,
+    ) -> torch.Tensor:
+        """Start phase for the orientation task-objective transition."""
+
+        if (
+            self._orientation_landing_start_phases
+            is None
+        ):
+            raise RuntimeError(
+                "No trajectory phase metadata loaded."
+            )
+
+        return (
+            self._orientation_landing_start_phases[
+                self._motion_id
+            ]
+    )
 
 
     @property

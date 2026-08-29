@@ -31,28 +31,72 @@ def quaternion_error_deg(q, q_ref):
     q = np.asarray(q, dtype=np.float64)
     q_ref = np.asarray(q_ref, dtype=np.float64)
 
-    q = q / np.linalg.norm(q, axis=-1, keepdims=True)
+    q = q / np.linalg.norm(
+        q,
+        axis=-1,
+        keepdims=True,
+    )
     q_ref = q_ref / np.linalg.norm(q_ref)
 
     dots = np.abs(q @ q_ref)
     dots = np.clip(dots, 0.0, 1.0)
 
-    return np.degrees(2.0 * np.arccos(dots))
+    return np.degrees(
+        2.0 * np.arccos(dots)
+    )
 
 
-def phase_from_frame(frame, start_frame, num_frames):
+def phase_from_frame(
+    frame,
+    start_frame,
+    num_frames,
+):
     """Normalized phase used by the motion command."""
-    denominator = max(num_frames - 1 - start_frame, 1)
-    return (frame - start_frame) / denominator
+    denominator = max(
+        num_frames - 1 - start_frame,
+        1,
+    )
+
+    return (
+        frame - start_frame
+    ) / denominator
+
+
+def distance_to_xy_disk(
+    positions_xy,
+    center_xy,
+    radius,
+):
+    """Distance from XY positions to the valid landing disk.
+
+    Distance is:
+        0 inside the disk,
+        distance_from_center - radius outside.
+    """
+
+    center_distance = np.linalg.norm(
+        positions_xy - center_xy[None, :],
+        axis=-1,
+    )
+
+    return np.maximum(
+        center_distance - radius,
+        0.0,
+    )
 
 
 def analyze_trajectory(
     path: Path,
     orientation_threshold_deg: float,
+    landing_radius_m: float,
+    position_region_tolerance_m: float,
     release_distance_m: float,
     start_frame: int,
 ):
-    with np.load(path, allow_pickle=False) as data:
+    with np.load(
+        path,
+        allow_pickle=False,
+    ) as data:
 
         required = {
             "fps",
@@ -66,12 +110,20 @@ def analyze_trajectory(
 
         if missing:
             raise ValueError(
-                f"{path.name}: missing required fields: {sorted(missing)}"
+                f"{path.name}: missing required fields: "
+                f"{sorted(missing)}"
             )
 
-        fps = float(np.asarray(data["fps"]).reshape(-1)[0])
+        fps = float(
+            np.asarray(
+                data["fps"]
+            ).reshape(-1)[0]
+        )
 
-        body_names = decode_names(data["body_names"])
+        body_names = decode_names(
+            data["body_names"]
+        )
+
         body_pos = np.asarray(
             data["body_pos_w"],
             dtype=np.float64,
@@ -91,55 +143,157 @@ def analyze_trajectory(
 
     if not 0 <= start_frame < num_frames:
         raise ValueError(
-            f"{path.name}: start_frame={start_frame} outside "
-            f"[0, {num_frames - 1}]"
+            f"{path.name}: start_frame={start_frame} "
+            f"outside [0, {num_frames - 1}]"
         )
 
+    frame_indices = np.arange(num_frames)
+
     # ==============================================================
-    # 1. LANDING-START PHASE
+    # 1. ORIENTATION LANDING START
     #
-    # First frame after which the object orientation remains within
-    # orientation_threshold_deg of its FINAL demonstrated orientation.
+    # First frame from which cube orientation remains within
+    # orientation_threshold_deg of its final demonstrated
+    # orientation.
     # ==============================================================
 
     final_quat = object_quat[-1]
 
-    orientation_error_deg = quaternion_error_deg(
-        object_quat,
-        final_quat,
+    orientation_error_deg = (
+        quaternion_error_deg(
+            object_quat,
+            final_quat,
+        )
     )
 
     # suffix_max[i] =
-    # maximum orientation error occurring from frame i to the end.
-    #
-    # Therefore suffix_max[i] <= threshold means:
-    # "from this point onwards, orientation never leaves the final
-    # orientation neighborhood."
-    suffix_max_orientation_error = np.maximum.accumulate(
-        orientation_error_deg[::-1]
-    )[::-1]
+    # maximum orientation error from frame i to the end.
+    suffix_max_orientation_error = (
+        np.maximum.accumulate(
+            orientation_error_deg[::-1]
+        )[::-1]
+    )
 
-    valid_landing_frames = np.flatnonzero(
-        (
-            suffix_max_orientation_error
-            <= orientation_threshold_deg
-        )
-        &
-        (
-            np.arange(num_frames) >= start_frame
+    valid_orientation_landing_frames = (
+        np.flatnonzero(
+            (
+                suffix_max_orientation_error
+                <= orientation_threshold_deg
+            )
+            &
+            (
+                frame_indices
+                >= start_frame
+            )
         )
     )
 
-    # The final frame will always satisfy the condition because its
-    # error relative to itself is zero.
-    landing_start_frame = int(valid_landing_frames[0])
+    # The final frame necessarily has zero orientation error
+    # relative to itself.
+    orientation_landing_start_frame = int(
+        valid_orientation_landing_frames[0]
+    )
+
+   
+    # ==============================================================
+    # 2. POSITION LANDING START
+    #
+    # The desired landing region is centered on the cube XY
+    # position at the beginning of the reference trajectory.
+    #
+    # We first identify the frame at which the cube reaches its
+    # maximum XY excursion from the landing center.
+    #
+    # We then search ONLY AFTER that frame for the first point from
+    # which the cube remains sufficiently close to the landing region
+    # for the rest of the trajectory.
+    # ==============================================================
+
+    landing_center_xy = (
+        object_pos[start_frame, :2].copy()
+    )
+
+    center_distance = np.linalg.norm(
+        object_pos[:, :2]
+        - landing_center_xy[None, :],
+        axis=-1,
+    )
+
+    # Find the frame at which the cube is farthest from its initial position.
+    max_excursion_frame = (
+        start_frame
+        + int(
+            np.argmax(
+                center_distance[start_frame:]
+            )
+        )
+    )
+
+    # Distance to the VALID LANDING DISK.
+
+    position_region_distance = (
+        distance_to_xy_disk(
+            positions_xy=object_pos[:, :2],
+            center_xy=landing_center_xy,
+            radius=landing_radius_m,
+        )
+    )
+
+    # suffix_max[i] =
+    # largest distance from the valid landing region occurring from
+    # frame i until the end.
+    #
+    # Therefore:
+    #
+    # suffix_max_position_region_distance[i] <= tolerance
+    #
+    # means that from frame i onward the cube never again leaves the
+    # chosen landing neighborhood.
+    suffix_max_position_region_distance = (
+        np.maximum.accumulate(
+            position_region_distance[::-1]
+        )[::-1]
+    )
+
+    # Search for landing only AFTER the maximum XY excursion.
+    valid_position_landing_frames = (
+        np.flatnonzero(
+            (
+                suffix_max_position_region_distance
+                <= position_region_tolerance_m
+            )
+            &
+            (
+                frame_indices
+                >= max_excursion_frame
+            )
+        )
+    )
+
+    if len(valid_position_landing_frames) == 0:
+        final_distance = (
+            position_region_distance[-1]
+        )
+
+        raise ValueError(
+            f"{path.name}: the reference never remains "
+            f"within {position_region_tolerance_m:.3f} m "
+            f"of the valid landing disk after its maximum "
+            f"XY excursion. "
+            f"Final distance to region is "
+            f"{final_distance:.3f} m."
+        )
+
+    position_landing_start_frame = int(
+        valid_position_landing_frames[0]
+    )
 
     # ==============================================================
-    # 2. RELEASE PHASE
+    # 3. RELEASE
     #
-    # First frame after landing_start where the closest hand remains
-    # farther than release_distance_m from the cube for the remainder
-    # of the trajectory.
+    # First frame from which the closest hand remains farther than
+    # release_distance_m for the remainder of the trajectory.
+
     # ==============================================================
 
     hand_indices = []
@@ -147,73 +301,118 @@ def analyze_trajectory(
     for hand_name in HAND_NAMES:
         if hand_name not in body_names:
             raise ValueError(
-                f"{path.name}: could not find {hand_name!r} "
-                f"in body_names."
+                f"{path.name}: could not find "
+                f"{hand_name!r} in body_names."
             )
 
         hand_indices.append(
             body_names.index(hand_name)
         )
 
-    hand_pos = body_pos[:, hand_indices, :]
+    hand_pos = body_pos[
+        :,
+        hand_indices,
+        :,
+    ]
 
     # Shape: [num_frames, 2]
     hand_cube_distance = np.linalg.norm(
-        hand_pos - object_pos[:, None, :],
+        hand_pos
+        - object_pos[:, None, :],
         axis=-1,
     )
 
-    # Distance of closest hand to cube.
     closest_hand_distance = np.min(
         hand_cube_distance,
         axis=1,
     )
 
-    # Sanity check: if neither hand ever gets within the chosen
-    # threshold, 0.25 m is not a meaningful release threshold
-    # for this trajectory.
-    if np.min(closest_hand_distance) > release_distance_m:
+    if (
+        np.min(closest_hand_distance)
+        > release_distance_m
+    ):
         raise ValueError(
             f"{path.name}: hands never enter the "
-            f"{release_distance_m:.3f} m release threshold. "
-            "Check the trajectory or choose a larger threshold."
+            f"{release_distance_m:.3f} m release "
+            f"threshold. Check trajectory or threshold."
         )
 
     # suffix_min[i] =
-    # closest the hands ever get to the object again after frame i.
-    #
-    # If suffix_min[i] > release_distance_m, they remain outside
-    # the release radius for the rest of the trajectory.
-    suffix_min_hand_distance = np.minimum.accumulate(
-        closest_hand_distance[::-1]
-    )[::-1]
+    # closest either hand ever gets again after frame i.
+    suffix_min_hand_distance = (
+        np.minimum.accumulate(
+            closest_hand_distance[::-1]
+        )[::-1]
+    )
 
     valid_release_frames = np.flatnonzero(
         (
-            suffix_min_hand_distance > release_distance_m
+            suffix_min_hand_distance
+            > release_distance_m
         )
         &
         (
-            np.arange(num_frames) >= landing_start_frame
+            frame_indices
+            >= start_frame
         )
     )
 
     if len(valid_release_frames) == 0:
-    
-        release_frame = num_frames - 1
+        release_frame = (
+            num_frames - 1
+        )
         release_found = False
+
     else:
-        release_frame = int(valid_release_frames[0])
+        release_frame = int(
+            valid_release_frames[0]
+        )
         release_found = True
 
     # ==============================================================
-    # Diagnostics
+    # 4. CONSISTENCY CHECKS
     # ==============================================================
 
-    landing_start_phase = phase_from_frame(
-        landing_start_frame,
-        start_frame,
-        num_frames,
+    if (
+        orientation_landing_start_frame
+        > release_frame
+    ):
+        raise ValueError(
+            f"{path.name}: orientation landing starts "
+            f"AFTER release "
+            f"({orientation_landing_start_frame} > "
+            f"{release_frame})."
+        )
+
+    if (
+        position_landing_start_frame
+        > release_frame
+    ):
+        raise ValueError(
+            f"{path.name}: position landing starts "
+            f"AFTER release "
+            f"({position_landing_start_frame} > "
+            f"{release_frame})."
+        )
+
+    # ==============================================================
+    # 5. NORMALIZED PHASES
+    # ==============================================================
+
+    orientation_landing_start_phase = (
+        phase_from_frame(
+            orientation_landing_start_frame,
+            start_frame,
+            num_frames,
+        )
+    )
+
+    position_landing_start_phase = (
+        phase_from_frame(
+            position_landing_start_frame,
+            start_frame,
+            num_frames,
+        )
     )
 
     release_phase = phase_from_frame(
@@ -222,20 +421,38 @@ def analyze_trajectory(
         num_frames,
     )
 
-    # How far is the final XY point from XY at release?
+    # ==============================================================
+    # 6. DIAGNOSTICS
+    # ==============================================================
+
+    orientation_blend_duration_s = (
+        release_frame
+        - orientation_landing_start_frame
+    ) / fps
+
+    position_blend_duration_s = (
+        release_frame
+        - position_landing_start_frame
+    ) / fps
+
+    # How far final XY is from XY at release.
     remaining_xy_net = np.linalg.norm(
         object_pos[-1, :2]
-        - object_pos[release_frame, :2]
+        - object_pos[
+            release_frame,
+            :2,
+        ]
     )
 
-    # Total XY path length after release.
-    # This can be larger than remaining_xy_net because mocap may
-    # contain small oscillations/jitter.
+    # Total XY path after release.
     if release_frame < num_frames - 1:
         remaining_xy_path = np.sum(
             np.linalg.norm(
                 np.diff(
-                    object_pos[release_frame:, :2],
+                    object_pos[
+                        release_frame:,
+                        :2,
+                    ],
                     axis=0,
                 ),
                 axis=-1,
@@ -244,15 +461,26 @@ def analyze_trajectory(
     else:
         remaining_xy_path = 0.0
 
-    release_xy = object_pos[release_frame, :2]
+    release_xy = object_pos[
+        release_frame,
+        :2,
+    ]
 
-    remaining_xy_excursion = np.linalg.norm(
-        object_pos[release_frame:, :2] - release_xy[None, :],
-        axis=-1,
+    remaining_xy_excursion = (
+        np.linalg.norm(
+            object_pos[
+                release_frame:,
+                :2,
+            ]
+            - release_xy[None, :],
+            axis=-1,
+        )
     )
 
-    max_xy_excursion_after_release = np.max(
-        remaining_xy_excursion
+    max_xy_excursion_after_release = (
+        np.max(
+            remaining_xy_excursion
+        )
     )
 
     return {
@@ -260,45 +488,139 @@ def analyze_trajectory(
         "num_frames": int(num_frames),
         "start_frame": int(start_frame),
 
-        "landing_start_frame": landing_start_frame,
-        "landing_start_time_s": (
-            landing_start_frame - start_frame
-        ) / fps,
-        "landing_start_phase": float(
-            landing_start_phase
+        # ----------------------------------------------------------
+        # Landing-region definition.
+        # ----------------------------------------------------------
+        "landing_center_xy": [
+            float(landing_center_xy[0]),
+            float(landing_center_xy[1]),
+        ],
+        "landing_radius_m": float(
+            landing_radius_m
+        ),
+        "position_region_tolerance_m": float(
+            position_region_tolerance_m
         ),
 
+        # ----------------------------------------------------------
+        # Orientation landing.
+        # ----------------------------------------------------------
+        "orientation_landing_start_frame": (
+            orientation_landing_start_frame
+        ),
+        "orientation_landing_start_time_s": (
+            orientation_landing_start_frame
+            - start_frame
+        ) / fps,
+        "orientation_landing_start_phase": float(
+            orientation_landing_start_phase
+        ),
+
+        # ----------------------------------------------------------
+        # Position landing.
+        # ----------------------------------------------------------
+        "position_landing_start_frame": (
+            position_landing_start_frame
+        ),
+        "position_landing_start_time_s": (
+            position_landing_start_frame
+            - start_frame
+        ) / fps,
+        "position_landing_start_phase": float(
+            position_landing_start_phase
+        ),
+        "max_xy_excursion_frame": int(
+            max_excursion_frame
+        ),
+
+        "max_xy_excursion_time_s": float(
+            (max_excursion_frame - start_frame)
+            / fps
+        ),
+
+        "max_xy_excursion_from_landing_center_m": float(
+            center_distance[max_excursion_frame]
+        ),
+
+        # ----------------------------------------------------------
+        # Release.
+        # ----------------------------------------------------------
         "release_frame": release_frame,
         "release_time_s": (
-            release_frame - start_frame
+            release_frame
+            - start_frame
         ) / fps,
         "release_phase": float(
             release_phase
         ),
         "release_found": release_found,
 
-        # Convenience field for the reward blending.
-        "landing_blend_phase": [
-            float(landing_start_phase),
+        # ----------------------------------------------------------
+        # Blend intervals.
+        # ----------------------------------------------------------
+        "orientation_blend_phase": [
+            float(
+                orientation_landing_start_phase
+            ),
             float(release_phase),
         ],
 
-        # Diagnostics for checking whether release makes sense.
+        "position_blend_phase": [
+            float(
+                position_landing_start_phase
+            ),
+            float(release_phase),
+        ],
+
+        "orientation_blend_duration_s": float(
+            orientation_blend_duration_s
+        ),
+
+        "position_blend_duration_s": float(
+            position_blend_duration_s
+        ),
+
+        # ----------------------------------------------------------
+        # Detector diagnostics.
+        # ----------------------------------------------------------
         "orientation_error_at_landing_start_deg": float(
-            orientation_error_deg[landing_start_frame]
+            orientation_error_deg[
+                orientation_landing_start_frame
+            ]
         ),
+
+        "position_region_distance_at_landing_start_m": float(
+            position_region_distance[
+                position_landing_start_frame
+            ]
+        ),
+
+        "max_remaining_position_region_distance_at_landing_start_m": float(
+            suffix_max_position_region_distance[
+                position_landing_start_frame
+            ]
+        ),
+
         "closest_hand_distance_at_release_m": float(
-            closest_hand_distance[release_frame]
+            closest_hand_distance[
+                release_frame
+            ]
         ),
+
         "minimum_hand_distance_m": float(
-            np.min(closest_hand_distance)
+            np.min(
+                closest_hand_distance
+            )
         ),
+
         "remaining_xy_net_after_release_m": float(
             remaining_xy_net
         ),
+
         "remaining_xy_path_after_release_m": float(
             remaining_xy_path
         ),
+
         "max_xy_excursion_after_release_m": float(
             max_xy_excursion_after_release
         ),
@@ -312,13 +634,17 @@ def main():
         "--motion_dir",
         type=Path,
         required=True,
-        help="Folder containing converted trajectory .npz files.",
+        help=(
+            "Folder containing converted trajectory .npz files."
+        ),
     )
 
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("trajectory_phase_metadata.json"),
+        default=Path(
+            "trajectory_phase_metadata.json"
+        ),
     )
 
     parser.add_argument(
@@ -332,8 +658,30 @@ def main():
         type=float,
         default=15.0,
         help=(
-            "Orientation is considered settled once it remains "
-            "within this angle of the final orientation."
+            "Orientation is considered settled once "
+            "it remains within this angular error of "
+            "the final demonstrated orientation."
+        ),
+    )
+
+    parser.add_argument(
+        "--landing_radius_m",
+        type=float,
+        default=0.025,
+        help=(
+            "Radius of the valid XY landing disk."
+        ),
+    )
+
+    parser.add_argument(
+        "--position_region_tolerance_m",
+        type=float,
+        default=0.025,
+        help=(
+            "Maximum allowed distance OUTSIDE the valid "
+            "landing disk for position landing detection. "
+            "Use 0.0 to require the trajectory to remain "
+            "strictly inside the valid disk."
         ),
     )
 
@@ -342,8 +690,9 @@ def main():
         type=float,
         default=0.22,
         help=(
-            "Hands are considered released once the closest hand "
-            "remains farther than this distance."
+            "Hands are considered released once the "
+            "closest hand remains farther than this "
+            "distance."
         ),
     )
 
@@ -352,45 +701,66 @@ def main():
         type=int,
         default=0,
         help=(
-            "Trajectory start frame used by the RL environment."
+            "Trajectory start frame used by the RL "
+            "environment."
         ),
     )
 
     args = parser.parse_args()
 
     paths = sorted(
-        args.motion_dir.glob(args.pattern)
+        args.motion_dir.glob(
+            args.pattern
+        )
     )
 
     if not paths:
         raise FileNotFoundError(
-            f"No trajectories matching {args.pattern!r} "
-            f"in {args.motion_dir}"
+            f"No trajectories matching "
+            f"{args.pattern!r} in "
+            f"{args.motion_dir}"
         )
 
     result = {
-        "schema_version": 1,
+        "schema_version": 2,
 
         "settings": {
             "orientation_threshold_deg": (
                 args.orientation_threshold_deg
             ),
+            "landing_radius_m": (
+                args.landing_radius_m
+            ),
+            "position_region_tolerance_m": (
+                args.position_region_tolerance_m
+            ),
             "release_distance_m": (
                 args.release_distance_m
             ),
-            "start_frame": args.start_frame,
+            "start_frame": (
+                args.start_frame
+            ),
         },
 
         "definitions": {
-            "landing_start": (
-                "First frame after which object orientation "
-                "remains within orientation_threshold_deg "
-                "of the final demonstrated orientation."
+            "orientation_landing_start": (
+                "First frame from which object "
+                "orientation remains within the "
+                "orientation threshold of the final "
+                "demonstrated orientation."
             ),
+
+            "position_landing_start": (
+                "First frame from which the reference "
+                "object XY position remains within the "
+                "configured tolerance of the valid "
+                "landing disk."
+            ),
+
             "release": (
-                "First frame after landing_start from which "
-                "the closest hand remains farther than "
-                "release_distance_m for the rest of the motion."
+                "First frame from which the closest "
+                "hand remains farther than the release "
+                "distance for the rest of the motion."
             ),
         },
 
@@ -400,11 +770,13 @@ def main():
     print()
     print(
         f"{'trajectory':45s} "
-        f"{'landing':>9s} "
+        f"{'ori land':>9s} "
+        f"{'pos land':>9s} "
         f"{'release':>9s} "
-        f"{'remaining XY':>16s}"
-        f"{'max_xy_excursion':>20s}"
+        f"{'ori->rel':>10s} "
+        f"{'pos->rel':>10s}"
     )
+
     print("-" * 100)
 
     for path in paths:
@@ -414,22 +786,31 @@ def main():
             orientation_threshold_deg=(
                 args.orientation_threshold_deg
             ),
+            landing_radius_m=(
+                args.landing_radius_m
+            ),
+            position_region_tolerance_m=(
+                args.position_region_tolerance_m
+            ),
             release_distance_m=(
                 args.release_distance_m
             ),
-            start_frame=args.start_frame,
+            start_frame=(
+                args.start_frame
+            ),
         )
 
-        # Use the actual file name as the lookup key. This avoids
-        # ambiguity between similarly named trajectories.
-        result["motions"][path.name] = metadata
+        result["motions"][
+            path.name
+        ] = metadata
 
         print(
             f"{path.name:45s} "
-            f"{metadata['landing_start_phase']:9.3f} "
+            f"{metadata['orientation_landing_start_phase']:9.3f} "
+            f"{metadata['position_landing_start_phase']:9.3f} "
             f"{metadata['release_phase']:9.3f} "
-            f"{100.0 * metadata['remaining_xy_net_after_release_m']:11.2f} cm "
-            f"{100.0 * metadata['max_xy_excursion_after_release_m']:11.2f} cm"
+            f"{metadata['orientation_blend_duration_s']:8.2f}s "
+            f"{metadata['position_blend_duration_s']:8.2f}s"
         )
 
     args.output.parent.mkdir(
@@ -437,7 +818,10 @@ def main():
         exist_ok=True,
     )
 
-    with open(args.output, "w") as f:
+    with open(
+        args.output,
+        "w",
+    ) as f:
         json.dump(
             result,
             f,
@@ -445,7 +829,10 @@ def main():
         )
 
     print()
-    print(f"Wrote metadata to: {args.output}")
+    print(
+        f"Wrote metadata to: "
+        f"{args.output}"
+    )
 
 
 if __name__ == "__main__":

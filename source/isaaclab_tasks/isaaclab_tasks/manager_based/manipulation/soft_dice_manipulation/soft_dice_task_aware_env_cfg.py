@@ -37,6 +37,17 @@ class TaskAwarePolicyCfg(
         },
     )
 
+    # Explicit task/motion phase information:
+    #
+    # [global motion phase,
+    #  position task blend,
+    #  orientation task blend]
+    # task_phase = ObsTerm(
+    #     func=mdp.task_phase_observation,
+    #     params={
+    #         "command_name": "motion",
+    #     },
+    # )
 
 @configclass
 class TaskAwareCriticCfg(
@@ -44,8 +55,6 @@ class TaskAwareCriticCfg(
 ):
     """Privileged critic observations for task-aware manipulation."""
 
-    # Keep all baseline privileged observations and additionally provide
-    # the same nominal-frame position seen by the actor.
     object_pos_r0 = ObsTerm(
         func=mdp.object_pos_r0,
         params={
@@ -53,6 +62,12 @@ class TaskAwareCriticCfg(
         },
     )
 
+    # task_phase = ObsTerm(
+    #     func=mdp.task_phase_observation,
+    #     params={
+    #         "command_name": "motion",
+    #     },
+    # )
 
 @configclass
 class TaskAwareObservationsCfg(

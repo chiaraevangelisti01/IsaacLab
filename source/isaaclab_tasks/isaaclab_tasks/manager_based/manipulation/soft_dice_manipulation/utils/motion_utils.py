@@ -701,8 +701,12 @@ def load_trajectory_phase_metadata(
     motion_lengths: torch.Tensor,
     start_frames: torch.Tensor,
     device: str,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """Load and validate landing/release phases for a motion pool."""
+) -> tuple[
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+]:
+    """Load and validate position/orientation landing and release phases."""
 
     metadata_path = Path(
         metadata_file
@@ -710,8 +714,8 @@ def load_trajectory_phase_metadata(
 
     if not metadata_path.is_file():
         raise FileNotFoundError(
-            f"Trajectory phase metadata file does not exist: "
-            f"{metadata_path}"
+            "Trajectory phase metadata file "
+            f"does not exist: {metadata_path}"
         )
 
     with metadata_path.open("r") as f:
@@ -719,12 +723,16 @@ def load_trajectory_phase_metadata(
 
     if "motions" not in metadata:
         raise ValueError(
-            f"{metadata_path} does not contain a 'motions' dictionary."
+            f"{metadata_path} does not contain "
+            "a 'motions' dictionary."
         )
 
-    motion_metadata = metadata["motions"]
+    motion_metadata = (
+        metadata["motions"]
+    )
 
-    landing_start_phases = []
+    position_landing_start_phases = []
+    orientation_landing_start_phases = []
     release_phases = []
 
     for motion_id, motion_path in enumerate(
@@ -735,20 +743,30 @@ def load_trajectory_phase_metadata(
         if key not in motion_metadata:
             raise KeyError(
                 f"No phase metadata found for "
-                f"trajectory '{key}' in {metadata_path}."
+                f"trajectory '{key}' in "
+                f"{metadata_path}."
             )
 
         entry = motion_metadata[key]
+
+        # ----------------------------------------------------------
+        # Check trajectory length.
+        # ----------------------------------------------------------
 
         metadata_num_frames = int(
             entry["num_frames"]
         )
 
         actual_num_frames = int(
-            motion_lengths[motion_id].item()
+            motion_lengths[
+                motion_id
+            ].item()
         )
 
-        if metadata_num_frames != actual_num_frames:
+        if (
+            metadata_num_frames
+            != actual_num_frames
+        ):
             raise ValueError(
                 f"{key}: metadata says "
                 f"{metadata_num_frames} frames, "
@@ -756,52 +774,132 @@ def load_trajectory_phase_metadata(
                 f"{actual_num_frames}."
             )
 
+        # ----------------------------------------------------------
+        # Check start frame.
+        # ----------------------------------------------------------
+
         metadata_start_frame = int(
-            entry.get("start_frame", 0)
+            entry.get(
+                "start_frame",
+                0,
+            )
         )
 
         actual_start_frame = int(
-            start_frames[motion_id].item()
+            start_frames[
+                motion_id
+            ].item()
         )
 
-        if metadata_start_frame != actual_start_frame:
-            raise ValueError(
-                f"{key}: phase metadata was computed with "
-                f"start_frame={metadata_start_frame}, "
-                f"but environment uses "
-                f"start_frame={actual_start_frame}."
-            )
-
-        if not bool(
-            entry.get("release_found", False)
+        if (
+            metadata_start_frame
+            != actual_start_frame
         ):
             raise ValueError(
-                f"{key}: preprocessing did not "
-                "successfully detect a release."
+                f"{key}: phase metadata was "
+                f"computed with start_frame="
+                f"{metadata_start_frame}, "
+                f"but environment uses "
+                f"start_frame="
+                f"{actual_start_frame}."
             )
 
-        landing_start = float(
-            entry["landing_start_phase"]
+        # ----------------------------------------------------------
+        # Release must have been detected.
+        # ----------------------------------------------------------
+
+        if not bool(
+            entry.get(
+                "release_found",
+                False,
+            )
+        ):
+            raise ValueError(
+                f"{key}: preprocessing did "
+                "not successfully detect a "
+                "release."
+            )
+
+        # ----------------------------------------------------------
+        # Load separate phases.
+        # ----------------------------------------------------------
+
+        required_phase_keys = {
+            "position_landing_start_phase",
+            "orientation_landing_start_phase",
+            "release_phase",
+        }
+
+        missing = (
+            required_phase_keys
+            - set(entry.keys())
+        )
+
+        if missing:
+            raise KeyError(
+                f"{key}: phase metadata is "
+                f"missing {sorted(missing)}. "
+                "Regenerate "
+                "trajectory_phase_metadata.json "
+                "with the new preprocessing script."
+            )
+
+        position_landing_start = float(
+            entry[
+                "position_landing_start_phase"
+            ]
+        )
+
+        orientation_landing_start = float(
+            entry[
+                "orientation_landing_start_phase"
+            ]
         )
 
         release = float(
-            entry["release_phase"]
+            entry[
+                "release_phase"
+            ]
         )
+
+        # ----------------------------------------------------------
+        # Validate both phase intervals independently.
+        # ----------------------------------------------------------
 
         if not (
             0.0
-            <= landing_start
+            <= position_landing_start
             <= release
             <= 1.0
         ):
             raise ValueError(
-                f"{key}: invalid phase interval: "
-                f"landing_start={landing_start}, "
+                f"{key}: invalid position "
+                f"phase interval: "
+                f"position_landing_start="
+                f"{position_landing_start}, "
                 f"release={release}."
             )
 
-        landing_start_phases.append(
-            landing_start
+        if not (
+            0.0
+            <= orientation_landing_start
+            <= release
+            <= 1.0
+        ):
+            raise ValueError(
+                f"{key}: invalid orientation "
+                f"phase interval: "
+                f"orientation_landing_start="
+                f"{orientation_landing_start}, "
+                f"release={release}."
+            )
+
+        position_landing_start_phases.append(
+            position_landing_start
+        )
+
+        orientation_landing_start_phases.append(
+            orientation_landing_start
         )
 
         release_phases.append(
@@ -810,10 +908,17 @@ def load_trajectory_phase_metadata(
 
     return (
         torch.tensor(
-            landing_start_phases,
+            position_landing_start_phases,
             dtype=torch.float32,
             device=device,
         ),
+
+        torch.tensor(
+            orientation_landing_start_phases,
+            dtype=torch.float32,
+            device=device,
+        ),
+
         torch.tensor(
             release_phases,
             dtype=torch.float32,

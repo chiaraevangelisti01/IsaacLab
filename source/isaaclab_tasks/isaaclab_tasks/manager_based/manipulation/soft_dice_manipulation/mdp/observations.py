@@ -12,9 +12,8 @@ from isaaclab.utils.math import (
 )
 
 from ..utils.motion_utils import H1_TRACKED_BODY_NAMES
-from ..utils.geometry_utils import (
-    position_in_frame,
-)
+from ..utils.geometry_utils import position_in_frame
+from ..utils.reward_utils import smooth_phase_blend
 
 if TYPE_CHECKING:
     from isaaclab.assets import Articulation
@@ -265,3 +264,60 @@ def object_pos_r0(
     )
 
     return object_pos_r0
+
+def task_phase_observation(
+    env: ManagerBasedRLEnv,
+    command_name: str = "motion",
+) -> torch.Tensor:
+    """Task-phase information for the actor.
+
+    Returns three normalized values per environment:
+
+        [global_phase,
+         position_task_blend,
+         orientation_task_blend]
+
+    global_phase:
+        Normalized progress through the selected reference motion.
+
+    position_task_blend:
+        0 before the position landing phase,
+        smoothly transitions from 0 to 1 until release,
+        1 after release.
+
+    orientation_task_blend:
+        Same definition, but using the orientation landing phase.
+    """
+
+    motion: MotionCommand = (
+        env.command_manager.get_term(
+            command_name
+        )
+    )
+
+    phase = motion.phase
+
+    position_blend = smooth_phase_blend(
+        phase=phase,
+        start_phase=(
+            motion.position_landing_start_phase
+        ),
+        end_phase=motion.release_phase,
+    )
+
+    orientation_blend = smooth_phase_blend(
+        phase=phase,
+        start_phase=(
+            motion.orientation_landing_start_phase
+        ),
+        end_phase=motion.release_phase,
+    )
+
+    return torch.stack(
+        (
+            phase,
+            position_blend,
+            orientation_blend,
+        ),
+        dim=-1,
+    )

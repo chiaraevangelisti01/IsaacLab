@@ -250,7 +250,9 @@ def object_phase_weighted_ref_position_error_exp(
 
     scale = decreasing_phase_scale(
         phase=motion.phase,
-        start_phase=motion.landing_start_phase,
+        start_phase=(
+            motion.position_landing_start_phase
+        ),
         end_phase=motion.release_phase,
         final_scale=final_reference_scale,
     )
@@ -285,7 +287,9 @@ def object_phase_weighted_ref_orientation_error_exp(
 
     scale = decreasing_phase_scale(
         phase=motion.phase,
-        start_phase=motion.landing_start_phase,
+        start_phase=(
+            motion.orientation_landing_start_phase
+        ),
         end_phase=motion.release_phase,
         final_scale=final_reference_scale,
     )
@@ -363,7 +367,9 @@ def landing_position_region_reward_exp(
 
     alpha = smooth_phase_blend(
         phase=motion.phase,
-        start_phase=motion.landing_start_phase,
+        start_phase=(
+            motion.position_landing_start_phase
+        ),
         end_phase=motion.release_phase,
     )
 
@@ -460,7 +466,7 @@ def landing_orientation_reward_exp(
     alpha = smooth_phase_blend(
         phase=motion.phase,
         start_phase=(
-            motion.landing_start_phase
+            motion.orientation_landing_start_phase
         ),
         end_phase=(
             motion.release_phase
