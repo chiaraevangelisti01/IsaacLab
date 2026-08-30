@@ -165,6 +165,54 @@ class TaskAwareRewardsCfg(
         },
     )
 
+    # --------------------------------------------------------------
+    # Late robot-motion tracking relaxation.
+    #
+    # Keep full reference tracking before the final landing phase,
+    # then progressively reduce its authority until release.
+    # --------------------------------------------------------------
+
+    motion_body_pos = RewTerm(
+        func=mdp.motion_phase_weighted_body_position_error_exp,
+        weight=1.0,
+        params={
+            "command_name": "motion",
+            "std": 0.3,
+            "include_hands": True,
+            "final_tracking_scale": 0.3,
+        },
+    )
+
+    motion_body_ori = RewTerm(
+        func=mdp.motion_phase_weighted_body_orientation_error_exp,
+        weight=1.0,
+        params={
+            "command_name": "motion",
+            "std": 0.4,
+            "final_tracking_scale": 0.3,
+        },
+    )
+
+    motion_body_lin_vel = RewTerm(
+        func=mdp.motion_phase_weighted_body_linear_velocity_error_exp,
+        weight=1.0,
+        params={
+            "command_name": "motion",
+            "std": 1.0,
+            "final_tracking_scale": 0.3,
+        },
+    )
+
+    motion_body_ang_vel = RewTerm(
+        func=mdp.motion_phase_weighted_body_angular_velocity_error_exp,
+        weight=1.0,
+        params={
+            "command_name": "motion",
+            "std": 3.14,
+            "final_tracking_scale": 0.3,
+        },
+    )
+
 
 # ======================================================================
 # Environment

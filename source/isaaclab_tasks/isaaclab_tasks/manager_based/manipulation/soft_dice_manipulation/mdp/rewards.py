@@ -183,6 +183,29 @@ def motion_global_body_angular_velocity_error_exp(
         / (std * std)
     )
 
+def late_motion_tracking_scale(
+    motion: MotionCommand,
+    final_scale: float,
+) -> torch.Tensor:
+    """Reduce robot reference-tracking authority near task completion.
+
+    Relaxation begins at the LATER of the position and orientation
+    landing phases and reaches final_scale at release.
+
+    """
+
+    start_phase = torch.maximum(
+        motion.position_landing_start_phase,
+        motion.orientation_landing_start_phase,
+    )
+
+    return decreasing_phase_scale(
+        phase=motion.phase,
+        start_phase=start_phase,
+        end_phase=motion.release_phase,
+        final_scale=final_scale,
+    ) 
+
 def object_global_ref_position_error_exp(
     env: ManagerBasedRLEnv,
     command_name: str,
@@ -226,6 +249,118 @@ def object_global_ref_orientation_error_exp(
 
 
 ###### Phase weighted rewards
+def motion_phase_weighted_body_position_error_exp(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    std: float,
+    final_tracking_scale: float,
+    include_hands: bool = False,
+) -> torch.Tensor:
+    """Track body positions, but relax tracking near final landing."""
+
+    motion: MotionCommand = (
+        env.command_manager.get_term(
+            command_name
+        )
+    )
+
+    reward = motion_relative_body_position_error_exp(
+        env=env,
+        command_name=command_name,
+        std=std,
+        include_hands=include_hands,
+    )
+
+    scale = late_motion_tracking_scale(
+        motion=motion,
+        final_scale=final_tracking_scale,
+    )
+
+    return scale * reward
+
+
+def motion_phase_weighted_body_orientation_error_exp(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    std: float,
+    final_tracking_scale: float,
+) -> torch.Tensor:
+    """Track body orientation, but relax tracking near final landing."""
+
+    motion: MotionCommand = (
+        env.command_manager.get_term(
+            command_name
+        )
+    )
+
+    reward = motion_relative_body_orientation_error_exp(
+        env=env,
+        command_name=command_name,
+        std=std,
+    )
+
+    scale = late_motion_tracking_scale(
+        motion=motion,
+        final_scale=final_tracking_scale,
+    )
+
+    return scale * reward
+
+
+def motion_phase_weighted_body_linear_velocity_error_exp(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    std: float,
+    final_tracking_scale: float,
+) -> torch.Tensor:
+    """Track body linear velocity, but relax tracking near final landing."""
+
+    motion: MotionCommand = (
+        env.command_manager.get_term(
+            command_name
+        )
+    )
+
+    reward = motion_global_body_linear_velocity_error_exp(
+        env=env,
+        command_name=command_name,
+        std=std,
+    )
+
+    scale = late_motion_tracking_scale(
+        motion=motion,
+        final_scale=final_tracking_scale,
+    )
+
+    return scale * reward
+
+
+def motion_phase_weighted_body_angular_velocity_error_exp(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    std: float,
+    final_tracking_scale: float,
+) -> torch.Tensor:
+    """Track body angular velocity, but relax tracking near final landing."""
+
+    motion: MotionCommand = (
+        env.command_manager.get_term(
+            command_name
+        )
+    )
+
+    reward = motion_global_body_angular_velocity_error_exp(
+        env=env,
+        command_name=command_name,
+        std=std,
+    )
+
+    scale = late_motion_tracking_scale(
+        motion=motion,
+        final_scale=final_tracking_scale,
+    )
+
+    return scale * reward
 def object_phase_weighted_ref_position_error_exp(
     env: ManagerBasedRLEnv,
     command_name: str,
