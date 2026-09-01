@@ -24,7 +24,7 @@ from .soft_dice_env_cfg import (
 
 
 @configclass
-class TaskAwarePolicyCfg(
+class LandingAwarePolicyCfg(
     ObservationsCfg.PolicyCfg
 ):
     """Actor observations for task-aware soft-dice manipulation."""
@@ -42,15 +42,15 @@ class TaskAwarePolicyCfg(
     # [global motion phase,
     #  position task blend,
     #  orientation task blend]
-    # task_phase = ObsTerm(
-    #     func=mdp.task_phase_observation,
-    #     params={
-    #         "command_name": "motion",
-    #     },
-    # )
+    task_phase = ObsTerm(
+        func=mdp.task_phase_observation,
+        params={
+            "command_name": "motion",
+        },
+    )
 
 @configclass
-class TaskAwareCriticCfg(
+class LandingAwareCriticCfg(
     ObservationsCfg.PrivilegedCfg
 ):
     """Privileged critic observations for task-aware manipulation."""
@@ -62,25 +62,25 @@ class TaskAwareCriticCfg(
         },
     )
 
-    # task_phase = ObsTerm(
-    #     func=mdp.task_phase_observation,
-    #     params={
-    #         "command_name": "motion",
-    #     },
-    # )
+    task_phase = ObsTerm(
+        func=mdp.task_phase_observation,
+        params={
+            "command_name": "motion",
+        },
+    )
 
 @configclass
-class TaskAwareObservationsCfg(
+class LandingAwareObservationsCfg(
     ObservationsCfg
 ):
     """Observation groups for the task-aware environment."""
 
-    policy: TaskAwarePolicyCfg = (
-        TaskAwarePolicyCfg()
+    policy: LandingAwarePolicyCfg = (
+        LandingAwarePolicyCfg()
     )
 
-    critic: TaskAwareCriticCfg = (
-        TaskAwareCriticCfg()
+    critic: LandingAwareCriticCfg = (
+        LandingAwareCriticCfg()
     )
 
 
@@ -90,7 +90,7 @@ class TaskAwareObservationsCfg(
 
 
 @configclass
-class TaskAwareRewardsCfg(
+class LandingAwareRewardsCfg(
     RewardsCfg
 ):
     """Task-aware object reward configuration.
@@ -220,19 +220,19 @@ class TaskAwareRewardsCfg(
 
 
 @configclass
-class SoftDiceTaskAwareEnvCfg(
+class SoftDiceLandingAwareEnvCfg(
     SoftDiceTrackingEnvCfg
 ):
     """Task-aware extension of the soft-dice tracking environment."""
 
     # Replace baseline observation configuration.
-    observations: TaskAwareObservationsCfg = (
-        TaskAwareObservationsCfg()
+    observations: LandingAwareObservationsCfg = (
+        LandingAwareObservationsCfg()
     )
 
     # Replace baseline reward configuration.
-    rewards: TaskAwareRewardsCfg = (
-        TaskAwareRewardsCfg()
+    rewards: LandingAwareRewardsCfg = (
+        LandingAwareRewardsCfg()
     )
 
     def __post_init__(self):
