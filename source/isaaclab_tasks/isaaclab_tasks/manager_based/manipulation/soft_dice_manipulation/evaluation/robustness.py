@@ -62,13 +62,6 @@ def get_robustness_buffers(env) -> dict:
         {},
     )
 
-    if "episode_index" not in buffers:
-        buffers["episode_index"] = torch.zeros(
-            env.num_envs,
-            dtype=torch.long,
-            device=env.device,
-        )
-
     if "condition_id" not in buffers:
         buffers["condition_id"] = torch.full(
             (env.num_envs,),
@@ -136,24 +129,63 @@ def reset_to_motion_start_with_robustness(
     if env_ids.numel() == 0:
         return
 
+    motion = env.command_manager.get_term(command_name)
     robustness = get_robustness_buffers(env)
+    # Select the reference motion first.
+    motion.sample_motions(env_ids)
+    motion_ids = motion.motion_id[env_ids]
 
-    episode_index = robustness[
-        "episode_index"
-    ][env_ids]
+    num_conditions = len(ROBUSTNESS_CONDITIONS)
 
-    condition_ids = torch.remainder(
-        env_ids + episode_index,
-        len(ROBUSTNESS_CONDITIONS),
-    )
+    if "condition_counts" not in robustness:
+        robustness["condition_counts"] = torch.zeros(
+            (motion.num_motions, num_conditions),
+            dtype=torch.long,
+            device=env.device,
+        )
+
+    condition_counts = robustness["condition_counts"]
+
+    condition_ids = torch.empty(
+    env_ids.numel(),
+    dtype=torch.long,
+    device=env.device,
+)
+
+    for motion_id in range(motion.num_motions):
+        local_indices = torch.nonzero(
+            motion_ids == motion_id,
+            as_tuple=False,
+        ).flatten()
+
+        if local_indices.numel() == 0:
+            continue
+
+        start_condition = torch.remainder(
+            condition_counts[motion_id].sum(),
+            num_conditions,
+        )
+
+        assigned_conditions = torch.remainder(
+            torch.arange(
+                local_indices.numel(),
+                dtype=torch.long,
+                device=env.device,
+            )
+            + start_condition,
+            num_conditions,
+        )
+
+        condition_ids[local_indices] = assigned_conditions
+
+        condition_counts[motion_id] += torch.bincount(
+            assigned_conditions,
+            minlength=num_conditions,
+        )
 
     robustness["condition_id"][
         env_ids
     ] = condition_ids
-
-    robustness["episode_index"][
-        env_ids
-    ] = episode_index + 1
 
     robustness["applied_perturbation"][
         env_ids
@@ -245,6 +277,7 @@ def reset_to_motion_start_with_robustness(
         cube_orientation_range=None,
         cube_position_offset=position_offset,
         cube_orientation_offset=orientation_offset,
+        sample_motion= False,
     )
 
     # ------------------------------------------------------------------

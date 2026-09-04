@@ -177,6 +177,7 @@ from isaaclab_tasks.manager_based.manipulation.soft_dice_manipulation.evaluation
 )
 
 from isaaclab_tasks.manager_based.manipulation.soft_dice_manipulation.evaluation.robustness import (
+    ROBUSTNESS_CONDITIONS,
     robustness_record_from_terminal,
     select_condition_records,
 )
@@ -284,13 +285,17 @@ def main():
     orientation_improvement_threshold_deg = float(args_cli.orientation_improvement_threshold_deg)
     severe_deformation_peak_threshold_mm = 2.0 * float(args_cli.high_deformation_threshold_mm)
 
+    num_conditions = len(ROBUSTNESS_CONDITIONS)
+    
     if args_cli.motion_file is not None:
-
         if args_cli.num_episodes <= 0:
+            raise ValueError("--num_episodes must be > 0.")
+ 
+        if args_cli.num_episodes % num_conditions != 0:
             raise ValueError(
-                "--num_episodes must be > 0."
+                f"--num_episodes must be a multiple of {num_conditions} "
+                "to balance robustness conditions equally."
             )
-
         motion_paths = [Path(args_cli.motion_file).expanduser().resolve()]
 
         target_episodes_per_motion = {motion_paths[0].stem: int(args_cli.num_episodes)}
@@ -306,6 +311,13 @@ def main():
                 "when using --motion_dir."
             )
 
+        if args_cli.episodes_per_motion % num_conditions != 0:
+            raise ValueError(
+                f"--episodes_per_motion must be a multiple of {num_conditions} "
+                f"to balance the robustness conditions equally. "
+                f"Got {args_cli.episodes_per_motion}."
+            )
+        
         motion_dir = (Path(args_cli.motion_dir).expanduser().resolve())
 
         motion_paths = sorted(
@@ -911,7 +923,23 @@ def main():
     # -------------------------------------------------------------------------
     # Aggregate results.
     # -------------------------------------------------------------------------
+    for motion_name, target_count in target_episodes_per_motion.items():
+        expected_per_condition = target_count // num_conditions
 
+        for condition in ROBUSTNESS_CONDITIONS:
+            actual_count = sum(
+                record["motion_name"] == motion_name
+                and record["robustness_condition"] == condition
+                for record in records
+            )
+
+            if actual_count != expected_per_condition:
+                raise RuntimeError(
+                    f"Unbalanced evaluation for {motion_name}, "
+                    f"condition={condition}: expected "
+                    f"{expected_per_condition}, got {actual_count}."
+                )
+        
     nominal_records, nominal_trajectory_records = (
         select_condition_records(
             records=records,
