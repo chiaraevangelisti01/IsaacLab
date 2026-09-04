@@ -11,69 +11,53 @@ import numpy as np
 import wandb
 
 from ..utils.motion_utils import H1_HAND_REFERENCE_NAMES, H1_TRACKED_BODY_NAMES
-from ..utils.deformable_utils import _compute_rest_deformation_reference
 
 
 # -----------------------------------------------------------------------------
 # Metrics shown in the compact W&B tables.
 # -----------------------------------------------------------------------------
-
-_DISPLAY_METRICS = [
-    ("Final XY position error", "final_xy_position_error_m", 100.0, "cm"),
-    ("Final orientation error", "final_orientation_error_deg", 1.0, "deg"),
-    ("Cube trajectory XY RMSE", "cube_xy_position_rmse_m", 100.0, "cm"),
-    ("Cube trajectory orientation RMSE", "cube_orientation_rmse_deg", 1.0, "deg"),
-    ("Body position RMSE", "body_position_rmse_m", 100.0, "cm"),
-    ("Body orientation RMSE", "body_orientation_rmse_deg", 1.0, "deg"),
-    ("Hand position RMSE", "hand_position_rmse_m", 100.0, "cm"),
-    ("Mean deformation RMS","deformation_rms_mean_m",1000.0,"mm"),
-    ("Peak deformation RMS","deformation_rms_peak_m",1000.0,"mm"),
-    ("Peak deformation P95","deformation_p95_peak_m",1000.0,"mm"),
+def _aggregate_metric_specs(records: list[dict]):
+    specs = [
+        ("Cube XY tracking RMSE", _tracking_metric_key(records, "cube_xy_position_rmse_m"), 100.0, "cm"),
+        ("Cube orientation tracking RMSE", _tracking_metric_key(records, "cube_orientation_rmse_deg"), 1.0, "deg"),
+        ("Body position tracking RMSE", _tracking_metric_key(records, "body_position_rmse_m"), 100.0, "cm"),
+        ("Body orientation tracking RMSE", _tracking_metric_key(records, "body_orientation_rmse_deg"), 1.0, "deg"),
+        ("Hand position tracking RMSE", _tracking_metric_key(records, "hand_position_rmse_m"), 100.0, "cm"),
+        ("Mean RMS deformation", "deformation_rms_mean_m", 1000.0, "mm"),
+        ("Peak RMS deformation", "deformation_rms_peak_m", 1000.0, "mm"),
+        ("High-deformation frames", "deformation_high_fraction", 100.0, "%"),
+        ("Torque RMS", "torque_rms_overall_nm", 1.0, "Nm"),
+        ("Action-delta RMS", "action_delta_rms_overall", 1.0, ""),
     ]
 
+    if "task_success" in records[0]:
+        specs = [
+            ("Task success", "task_success", 100.0, "%"),
+            ("Landing success", "final_landing_success", 100.0, "%"),
+            ("Landing position success", "final_landing_position_success", 100.0, "%"),
+            ("Landing orientation success", "final_landing_orientation_success", 100.0, "%"),
+            ("Top-face success", "final_top_face_success", 100.0, "%"),
+            ("Landing XY error", "final_landing_xy_error_m", 100.0, "cm"),
+            ("Landing orientation error", "final_landing_orientation_error_deg", 1.0, "deg"),
+            ("Position improvement", "landing_position_improvement_m", 100.0, "cm"),
+            ("Orientation improvement", "landing_orientation_improvement_deg", 1.0, "deg"),
+        ] + specs
+    else:
+        specs = [
+            ("Top-face correct", "final_top_face_correct", 100.0, "%"),
+            ("Final XY reference error", "final_xy_position_error_m", 100.0, "cm"),
+            ("Final orientation reference error", "final_orientation_error_deg", 1.0, "deg"),
+        ] + specs
+
+    return specs
 
 def _pretty_name(name: str) -> str:
     """Convert internal Isaac names to readable labels."""
     return name.replace("_link", "").replace("_", " ").title()
 
-
-def _aggregate_by_frame(
-    trajectory_records: list[dict],
-    key: str,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Aggregate a trajectory quantity across episodes by motion frame."""
-
-    values_by_frame: dict[int, list[np.ndarray]] = defaultdict(list)
-
-    for episode in trajectory_records:
-        frames = np.asarray(episode["motion_frame"], dtype=np.int64)
-        values = np.asarray(episode[key], dtype=np.float64)
-
-        if frames.shape[0] != values.shape[0]:
-            raise ValueError(
-                f"Frame/value length mismatch for {key}: "
-                f"{frames.shape[0]} vs {values.shape[0]}."
-            )
-
-        for frame, value in zip(frames, values):
-            if frame >= 0:
-                values_by_frame[int(frame)].append(
-                    np.asarray(value, dtype=np.float64)
-                )
-
-    if not values_by_frame:
-        raise ValueError(f"No trajectory data available for {key}.")
-
-    frames = np.asarray(sorted(values_by_frame.keys()), dtype=np.int64)
-    means = []
-    stds = []
-
-    for frame in frames:
-        stacked = np.stack(values_by_frame[int(frame)], axis=0)
-        means.append(np.mean(stacked, axis=0))
-        stds.append(np.std(stacked, axis=0))
-
-    return frames, np.stack(means, axis=0), np.stack(stds, axis=0)
+def _tracking_metric_key(records: list[dict], base_key: str) -> str:
+    pre_key = f"pre_relaxation_{base_key}"
+    return pre_key if pre_key in records[0] else base_key
 
 
 # -----------------------------------------------------------------------------
@@ -85,55 +69,228 @@ def compute_main_metric_summary(records: list[dict]) -> dict[str, float]:
 
     summary = {}
 
-    for _, key, _, _ in _DISPLAY_METRICS:
-        values = np.asarray([float(record[key]) for record in records], dtype=np.float64)
-        summary[f"{key}_mean"] = float(np.mean(values))
-        summary[f"{key}_std"] = float(np.std(values))
-
     if "final_top_face_correct" in records[0]:
         summary["top_face_success_rate"] = float(
             np.mean([record["final_top_face_correct"] for record in records])
         )
 
+    deformation_rms_mean = np.asarray([record["deformation_rms_mean_m"] for record in records], dtype=np.float64)
+    deformation_rms_peak = np.asarray([record["deformation_rms_peak_m"] for record in records], dtype=np.float64)
+    deformation_high_fraction = np.asarray([record["deformation_high_fraction"] for record in records],dtype=np.float64)
+    torque_rms_overall = np.asarray([record["torque_rms_overall_nm"] for record in records],dtype=np.float64)
+    action_delta_rms_overall = np.asarray([record["action_delta_rms_overall"] for record in records],dtype=np.float64)
+
+    summary["num_episodes"] = len(records)
+    summary["deformation_overall_mean_rms_mm"] = float(1000.0 * np.mean(deformation_rms_mean))
+    summary["deformation_overall_std_rms_mm"] = float(1000.0 * np.std(deformation_rms_mean))
+    summary["deformation_mean_episode_peak_rms_mm"] = float(1000.0 * np.mean(deformation_rms_peak))
+    summary["deformation_worst_episode_peak_rms_mm"] = float(1000.0 * np.max(deformation_rms_peak))
+    summary["deformation_high_fraction_mean_pct"] = float(100.0 * np.mean(deformation_high_fraction))
+    summary["deformation_high_fraction_std_pct"] = float(100.0 * np.std(deformation_high_fraction))
+    summary["torque_rms_overall_mean_nm"] = float(np.mean(torque_rms_overall))
+    summary["torque_rms_overall_std_nm"] = float(np.std(torque_rms_overall))
+    summary["action_delta_rms_overall_mean"] = float(np.mean(action_delta_rms_overall))
+    summary["action_delta_rms_overall_std"] = float(np.std(action_delta_rms_overall))
+
+    if "final_landing_xy_error_m" in records[0]:
+        final_landing_xy_error = np.asarray([r["final_landing_xy_error_m"] for r in records], dtype=np.float64)
+        reference_landing_xy_error = np.asarray([r["reference_landing_xy_error_m"] for r in records], dtype=np.float64)
+        position_improvement = np.asarray([r["landing_position_improvement_m"] for r in records], dtype=np.float64)
+
+        final_orientation_error = np.asarray([r["final_landing_orientation_error_deg"] for r in records], dtype=np.float64)
+        reference_orientation_error = np.asarray([r["reference_landing_orientation_error_deg"] for r in records], dtype=np.float64)
+        orientation_improvement = np.asarray([r["landing_orientation_improvement_deg"] for r in records], dtype=np.float64)
+
+        summary["reference_landing_xy_error_mean_cm"] = float(100.0 * np.mean(reference_landing_xy_error))
+        summary["final_landing_xy_error_mean_cm"] = float(100.0 * np.mean(final_landing_xy_error))
+        summary["final_landing_xy_error_std_cm"] = float(100.0 * np.std(final_landing_xy_error))
+        summary["landing_position_improvement_mean_cm"] = float(100.0 * np.mean(position_improvement))
+        summary["landing_position_improvement_std_cm"] = float(100.0 * np.std(position_improvement))
+
+        summary["reference_landing_orientation_error_mean_deg"] = float(np.mean(reference_orientation_error))
+        summary["final_landing_orientation_error_mean_deg"] = float(np.mean(final_orientation_error))
+        summary["final_landing_orientation_error_std_deg"] = float(np.std(final_orientation_error))
+        summary["landing_orientation_improvement_mean_deg"] = float(np.mean(orientation_improvement))
+        summary["landing_orientation_improvement_std_deg"] = float(np.std(orientation_improvement))
+
+        summary["landing_position_improved_rate"] = float(np.mean([r["landing_position_improved"] for r in records]))
+        summary["landing_orientation_improved_rate"] = float(np.mean([r["landing_orientation_improved"] for r in records]))
+
+        summary["landing_position_success_rate"] = float(np.mean([r["final_landing_position_success"] for r in records]))
+        summary["landing_orientation_success_rate"] = float(np.mean([r["final_landing_orientation_success"] for r in records]))
+        summary["landing_success_rate"] = float(np.mean([r["final_landing_success"] for r in records]))
+        summary["task_success_rate"] = float(np.mean([r["task_success"] for r in records]))
+
+        summary["reference_landing_success_rate"] = float(np.mean([r["reference_landing_success"] for r in records]))
+        summary["landing_success_gain_rate"] = float(np.mean([r["landing_success_gain"] for r in records]))
+        summary["landing_success_loss_rate"] = float(np.mean([r["landing_success_loss"] for r in records]))
+
+    tracking_metrics = {
+        "tracking_body_position_rmse_m": "body_position_rmse_m",
+        "tracking_body_orientation_rmse_deg": "body_orientation_rmse_deg",
+        "tracking_hand_position_rmse_m": "hand_position_rmse_m",
+        "tracking_cube_xy_position_rmse_m": "cube_xy_position_rmse_m",
+        "tracking_cube_orientation_rmse_deg": "cube_orientation_rmse_deg",
+    }
+
+    for output_key, base_key in tracking_metrics.items():
+        values = np.asarray([r[_tracking_metric_key(records, base_key)] for r in records], dtype=np.float64)
+        summary[f"{output_key}_mean"] = float(np.mean(values))
+        summary[f"{output_key}_std"] = float(np.std(values))
+
     return summary
+
+def group_records_by_motion(records: list[dict]) -> dict[str, list[dict]]:
+    records_by_motion = defaultdict(list)
+
+    for record in records:
+        records_by_motion[record["motion_name"]].append(record)
+
+    return dict(sorted(records_by_motion.items()))
+
+
+def compute_per_motion_metric_summary(records: list[dict]) -> dict[str, dict[str, float]]:
+    records_by_motion = group_records_by_motion(records)
+
+    return {
+        motion_name: compute_main_metric_summary(motion_records)
+        for motion_name, motion_records in records_by_motion.items()
+    }
+
+def _landing_improvement_labels(records: list[dict]):
+    position_labels = []
+    orientation_labels = []
+    combined_labels = []
+    success_labels = []
+
+    for record in records:
+        pos_better = bool(record["landing_position_improved"] > 0.5)
+        pos_worse = bool(record["landing_position_worsened"] > 0.5)
+        ori_better = bool(record["landing_orientation_improved"] > 0.5)
+        ori_worse = bool(record["landing_orientation_worsened"] > 0.5)
+
+        if pos_better:
+            position_labels.append("Better")
+        elif pos_worse:
+            position_labels.append("Worse")
+        else:
+            position_labels.append("Same")
+
+        if ori_better:
+            orientation_labels.append("Better")
+        elif ori_worse:
+            orientation_labels.append("Worse")
+        else:
+            orientation_labels.append("Same")
+
+        if (pos_better or ori_better) and not (pos_worse or ori_worse):
+            combined_labels.append("Improved")
+        elif (pos_worse or ori_worse) and not (pos_better or ori_better):
+            combined_labels.append("Worse")
+        elif pos_better or pos_worse or ori_better or ori_worse:
+            combined_labels.append("Mixed")
+        else:
+            combined_labels.append("Same")
+
+        reference_success = bool(record["reference_landing_success"] > 0.5)
+        final_success = bool(record["final_landing_success"] > 0.5)
+
+        if reference_success and final_success:
+            success_labels.append("Kept success")
+        elif not reference_success and final_success:
+            success_labels.append("Failure→success")
+        elif reference_success and not final_success:
+            success_labels.append("Success→failure")
+        else:
+            success_labels.append("Kept failure")
+
+    return position_labels, orientation_labels, combined_labels, success_labels
+
+def _count_categories(labels: list[str], categories: list[str]) -> np.ndarray:
+    counts = Counter(labels)
+    return np.asarray([counts.get(category, 0) for category in categories], dtype=np.float64)
 
 
 def _make_episode_table(records: list[dict]) -> wandb.Table:
-    """Compact one-row-per-episode table."""
+    """Compact one-row-per-episode evaluation table."""
+
+    landing_aware = "task_success" in records[0]
 
     columns = [
         "episode",
+        "motion",
         "termination",
         "duration_s",
-        "top_face_correct",
-        "final_xy_error_cm",
-        "final_orientation_error_deg",
-        "cube_xy_rmse_cm",
-        "cube_orientation_rmse_deg",
-        "body_position_rmse_cm",
-        "body_orientation_rmse_deg",
-        "hand_position_rmse_cm",
+        "motion_finished",
+        "tracking_cube_xy_rmse_cm",
+        "tracking_cube_orientation_rmse_deg",
+        "deformation_rms_mm",
+        "torque_rms_nm",
+        "action_delta_rms",
     ]
 
-    data = [
-        [
+    if landing_aware:
+        columns += [
+            "task_success",
+            "landing_success",
+            "position_success",
+            "orientation_success",
+            "top_face_success",
+            "landing_xy_error_cm",
+            "landing_orientation_error_deg",
+            "reference_landing_success",
+            "position_improvement_cm",
+            "orientation_improvement_deg",
+        ]
+    else:
+        columns += [
+            "top_face_correct",
+            "final_xy_reference_error_cm",
+            "final_orientation_reference_error_deg",
+        ]
+
+    cube_xy_key = _tracking_metric_key(records, "cube_xy_position_rmse_m")
+    cube_orientation_key = _tracking_metric_key(records, "cube_orientation_rmse_deg")
+
+    data = []
+
+    for record in records:
+        row = [
             record["episode_id"],
+            record["motion_name"],
             record["termination"],
             record["duration_s"],
-            bool(record["final_top_face_correct"]),
-            100.0 * record["final_xy_position_error_m"],
-            record["final_orientation_error_deg"],
-            100.0 * record["cube_xy_position_rmse_m"],
-            record["cube_orientation_rmse_deg"],
-            100.0 * record["body_position_rmse_m"],
-            record["body_orientation_rmse_deg"],
-            100.0 * record["hand_position_rmse_m"],
+            bool(record["motion_finished"]),
+            100.0 * record[cube_xy_key],
+            record[cube_orientation_key],
+            1000.0 * record["deformation_rms_mean_m"],
+            record["torque_rms_overall_nm"],
+            record["action_delta_rms_overall"],
         ]
-        for record in records
-    ]
+
+        if landing_aware:
+            row += [
+                bool(record["task_success"]),
+                bool(record["final_landing_success"]),
+                bool(record["final_landing_position_success"]),
+                bool(record["final_landing_orientation_success"]),
+                bool(record["final_top_face_success"]),
+                100.0 * record["final_landing_xy_error_m"],
+                record["final_landing_orientation_error_deg"],
+                bool(record["reference_landing_success"]),
+                100.0 * record["landing_position_improvement_m"],
+                record["landing_orientation_improvement_deg"],
+            ]
+        else:
+            row += [
+                bool(record["final_top_face_correct"]),
+                100.0 * record["final_xy_position_error_m"],
+                record["final_orientation_error_deg"],
+            ]
+
+        data.append(row)
 
     return wandb.Table(columns=columns, data=data)
-
 
 def _make_aggregate_table(records: list[dict]) -> wandb.Table:
     """Mean/std/median/max table for primary metrics."""
@@ -141,7 +298,7 @@ def _make_aggregate_table(records: list[dict]) -> wandb.Table:
     columns = ["metric", "mean", "std", "median", "max", "unit"]
     data = []
 
-    for display_name, key, scale, unit in _DISPLAY_METRICS:
+    for display_name, key, scale, unit in _aggregate_metric_specs(records):
         values = np.asarray(
             [float(record[key]) for record in records],
             dtype=np.float64,
@@ -160,6 +317,65 @@ def _make_aggregate_table(records: list[dict]) -> wandb.Table:
 
     return wandb.Table(columns=columns, data=data)
 
+def make_per_motion_summary_table(per_motion_summary: dict[str, dict[str, float]]) -> wandb.Table:
+    landing_aware = "task_success_rate" in next(iter(per_motion_summary.values()))
+
+    columns = [
+        "motion",
+        "episodes",
+        "tracking_cube_xy_rmse_cm",
+        "tracking_cube_orientation_rmse_deg",
+        "tracking_body_position_rmse_cm",
+        "tracking_body_orientation_rmse_deg",
+        "tracking_hand_position_rmse_cm",
+        "deformation_rms_mm",
+        "deformation_peak_rms_mm",
+        "high_deformation_pct",
+        "torque_rms_nm",
+        "action_delta_rms",
+    ]
+
+    if landing_aware:
+        columns += [
+            "task_success_pct",
+            "landing_success_pct",
+            "landing_xy_error_cm",
+            "landing_orientation_error_deg",
+            "position_improvement_cm",
+            "orientation_improvement_deg",
+        ]
+
+    data = []
+
+    for motion_name, metrics in per_motion_summary.items():
+        row = [
+            motion_name,
+            metrics["num_episodes"],
+            100.0 * metrics["tracking_cube_xy_position_rmse_m_mean"],
+            metrics["tracking_cube_orientation_rmse_deg_mean"],
+            100.0 * metrics["tracking_body_position_rmse_m_mean"],
+            metrics["tracking_body_orientation_rmse_deg_mean"],
+            100.0 * metrics["tracking_hand_position_rmse_m_mean"],
+            metrics["deformation_overall_mean_rms_mm"],
+            metrics["deformation_mean_episode_peak_rms_mm"],
+            metrics["deformation_high_fraction_mean_pct"],
+            metrics["torque_rms_overall_mean_nm"],
+            metrics["action_delta_rms_overall_mean"],
+        ]
+
+        if landing_aware:
+            row += [
+                100.0 * metrics["task_success_rate"],
+                100.0 * metrics["landing_success_rate"],
+                metrics["final_landing_xy_error_mean_cm"],
+                metrics["final_landing_orientation_error_mean_deg"],
+                metrics["landing_position_improvement_mean_cm"],
+                metrics["landing_orientation_improvement_mean_deg"],
+            ]
+
+        data.append(row)
+
+    return wandb.Table(columns=columns, data=data)
 
 def _make_termination_chart(records: list[dict]):
     counts = Counter(record["termination"] for record in records)
@@ -179,205 +395,30 @@ def _make_termination_chart(records: list[dict]):
         title="Episode termination types",
     )
 
-
-# -----------------------------------------------------------------------------
-# Cube trajectory.
-# -----------------------------------------------------------------------------
-
-def _plot_cube_tracking(trajectory_records: list[dict]):
-    frames, position_mean, position_std = _aggregate_by_frame(
-        trajectory_records,
-        "cube_position_delta_m",
-    )
-
-    orientation_frames, orientation_mean, orientation_std = _aggregate_by_frame(
-        trajectory_records,
-        "cube_orientation_error_rad",
-    )
-
-    position_mean_cm = 100.0 * position_mean
-    position_std_cm = 100.0 * position_std
-    orientation_mean_deg = np.degrees(orientation_mean)
-    orientation_std_deg = np.degrees(orientation_std)
-
-    fig, axes = plt.subplots(3, 1, figsize=(10, 10), sharex=True)
-
-    # X error.
-    line = axes[0].plot(
-        frames,
-        position_mean_cm[:, 0],
-        label="Mean",
-    )[0]
-
-    axes[0].fill_between(
-        frames,
-        position_mean_cm[:, 0] - position_std_cm[:, 0],
-        position_mean_cm[:, 0] + position_std_cm[:, 0],
-        alpha=0.2,
-        color=line.get_color(),
-    )
-
-    axes[0].axhline(0.0, linewidth=0.8, linestyle="--")
-    axes[0].set_ylabel("X error [cm]")
-    axes[0].set_title("Cube trajectory tracking")
-
-    # Y error.
-    line = axes[1].plot(
-        frames,
-        position_mean_cm[:, 1],
-        label="Mean",
-    )[0]
-
-    axes[1].fill_between(
-        frames,
-        position_mean_cm[:, 1] - position_std_cm[:, 1],
-        position_mean_cm[:, 1] + position_std_cm[:, 1],
-        alpha=0.2,
-        color=line.get_color(),
-    )
-
-    axes[1].axhline(0.0, linewidth=0.8, linestyle="--")
-    axes[1].set_ylabel("Y error [cm]")
-
-    # Orientation error.
-    line = axes[2].plot(
-        orientation_frames,
-        orientation_mean_deg,
-        label="Mean",
-    )[0]
-
-    axes[2].fill_between(
-        orientation_frames,
-        orientation_mean_deg - orientation_std_deg,
-        orientation_mean_deg + orientation_std_deg,
-        alpha=0.2,
-        color=line.get_color(),
-    )
-
-    axes[2].set_ylabel("Orientation error [deg]")
-    axes[2].set_xlabel("Motion frame")
-
-    fig.tight_layout()
-    return fig
-
-
-# -----------------------------------------------------------------------------
-# Robot body tracking.
-# -----------------------------------------------------------------------------
-
-def _plot_body_tracking(trajectory_records: list[dict]):
-    frames, position_mean, _ = _aggregate_by_frame(
-        trajectory_records,
-        "body_position_error_m",
-    )
-
-    orientation_frames, orientation_mean, _ = _aggregate_by_frame(
-        trajectory_records,
-        "body_orientation_error_rad",
-    )
-
-    fig, axes = plt.subplots(2, 1, figsize=(11, 9), sharex=True)
-
-    for body_index, body_name in enumerate(H1_TRACKED_BODY_NAMES):
-        label = _pretty_name(body_name)
-
-        axes[0].plot(
-            frames,
-            100.0 * position_mean[:, body_index],
-            label=label,
-        )
-
-        axes[1].plot(
-            orientation_frames,
-            np.degrees(orientation_mean[:, body_index]),
-            label=label,
-        )
-
-    axes[0].set_title("Tracked-body Cartesian trajectory error")
-    axes[0].set_ylabel("Position error [cm]")
-    axes[0].legend(ncol=2, fontsize=8)
-
-    axes[1].set_ylabel("Orientation error [deg]")
-    axes[1].set_xlabel("Motion frame")
-    axes[1].legend(ncol=2, fontsize=8)
-
-    fig.tight_layout()
-    return fig
-
-
-# -----------------------------------------------------------------------------
-# Hand tracking.
-# -----------------------------------------------------------------------------
-
-def _plot_hand_tracking(trajectory_records: list[dict]):
-    frames, hand_mean, hand_std = _aggregate_by_frame(
-        trajectory_records,
-        "hand_position_error_m",
-    )
-
-    fig, ax = plt.subplots(figsize=(10, 5))
-
-    for hand_index, hand_name in enumerate(H1_HAND_REFERENCE_NAMES):
-        mean_cm = 100.0 * hand_mean[:, hand_index]
-        std_cm = 100.0 * hand_std[:, hand_index]
-
-        line = ax.plot(
-            frames,
-            mean_cm,
-            label=_pretty_name(hand_name),
-        )[0]
-
-        ax.fill_between(
-            frames,
-            mean_cm - std_cm,
-            mean_cm + std_cm,
-            alpha=0.15,
-            color=line.get_color(),
-        )
-
-    ax.set_title("Hand Cartesian trajectory tracking")
-    ax.set_xlabel("Motion frame")
-    ax.set_ylabel("Position error [cm]")
-    ax.legend()
-
-    fig.tight_layout()
-    return fig
-
-
 # -----------------------------------------------------------------------------
 # Aggregate body/hand errors.
 # -----------------------------------------------------------------------------
 
 def _plot_per_body_rmse(records: list[dict]):
-    position_labels = []
-    position_values = []
+
+    position_labels, position_values = [], []
 
     for body_name in H1_TRACKED_BODY_NAMES:
-        key = f"body_position_rmse_{body_name}_m"
-
+        key = _tracking_metric_key(records, f"body_position_rmse_{body_name}_m")
         position_labels.append(_pretty_name(body_name))
-        position_values.append(
-            100.0 * np.mean([record[key] for record in records])
-        )
+        position_values.append(100.0 * np.mean([r[key] for r in records]))
 
     for hand_name in H1_HAND_REFERENCE_NAMES:
-        key = f"hand_position_rmse_{hand_name}_m"
-
+        key = _tracking_metric_key(records, f"hand_position_rmse_{hand_name}_m")
         position_labels.append(_pretty_name(hand_name))
-        position_values.append(
-            100.0 * np.mean([record[key] for record in records])
-        )
+        position_values.append(100.0 * np.mean([r[key] for r in records]))
 
-    orientation_labels = []
-    orientation_values = []
+    orientation_labels, orientation_values = [], []
 
     for body_name in H1_TRACKED_BODY_NAMES:
-        key = f"body_orientation_rmse_{body_name}_deg"
-
+        key = _tracking_metric_key(records, f"body_orientation_rmse_{body_name}_deg")
         orientation_labels.append(_pretty_name(body_name))
-        orientation_values.append(
-            np.mean([record[key] for record in records])
-        )
+        orientation_values.append(np.mean([r[key] for r in records]))
 
     fig, axes = plt.subplots(1, 2, figsize=(13, 6))
 
@@ -389,82 +430,119 @@ def _plot_per_body_rmse(records: list[dict]):
     axes[1].set_title("Orientation tracking RMSE")
     axes[1].set_xlabel("RMSE [deg]")
 
+    scope = "Pre-relaxation" if "pre_relaxation_body_position_rmse_m" in records[0] else "Full-trajectory"
+    fig.suptitle(f"{scope} body and hand tracking")
     fig.tight_layout()
+
+    return fig
+
+
+# -----------------------------------------------------------------------------
+# Tracking metrics
+# -----------------------------------------------------------------------------
+
+def _plot_tracking_quality_overview(records: list[dict]):
+
+    body_pos = 100.0 * np.asarray([r[_tracking_metric_key(records, "body_position_rmse_m")] for r in records])
+    hand_pos = 100.0 * np.asarray([r[_tracking_metric_key(records, "hand_position_rmse_m")] for r in records])
+    cube_pos = 100.0 * np.asarray([r[_tracking_metric_key(records, "cube_xy_position_rmse_m")] for r in records])
+    body_ori = np.asarray([r[_tracking_metric_key(records, "body_orientation_rmse_deg")] for r in records])
+    cube_ori = np.asarray([r[_tracking_metric_key(records, "cube_orientation_rmse_deg")] for r in records])
+
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+
+    position_data = [body_pos, hand_pos, cube_pos]
+    for i, values in enumerate(position_data, 1):
+        axes[0].scatter(np.linspace(i - 0.08, i + 0.08, len(values)), values, alpha=0.5)
+    axes[0].boxplot(position_data, labels=["Body", "Hands", "Cube XY"])
+    axes[0].set_ylabel("RMSE [cm]")
+    axes[0].set_title("Position tracking")
+
+    orientation_data = [body_ori, cube_ori]
+    for i, values in enumerate(orientation_data, 1):
+        axes[1].scatter(np.linspace(i - 0.08, i + 0.08, len(values)), values, alpha=0.5)
+    axes[1].boxplot(orientation_data, labels=["Body", "Cube"])
+    axes[1].set_ylabel("RMSE [deg]")
+    axes[1].set_title("Orientation tracking")
+
+    scope = "Pre-relaxation" if "pre_relaxation_body_position_rmse_m" in records[0] else "Full-trajectory"
+    fig.suptitle(f"{scope} tracking quality")
+    fig.tight_layout()
+
+    return fig
+
+def _plot_position_tracking_by_motion(records: list[dict]):
+
+    records_by_motion = group_records_by_motion(records)
+    motion_names = list(records_by_motion)
+    specs = [
+        ("body_position_rmse_m", "Body"),
+        ("hand_position_rmse_m", "Hands"),
+        ("cube_xy_position_rmse_m", "Cube XY"),
+    ]
+
+    y = np.arange(len(motion_names))
+    fig, axes = plt.subplots(1, 3, figsize=(18, max(5, 0.5 * len(motion_names))), sharey=True)
+
+    for ax, (base_key, title) in zip(axes, specs):
+        means, stds = [], []
+        for motion_name in motion_names:
+            motion_records = records_by_motion[motion_name]
+            key = _tracking_metric_key(motion_records, base_key)
+            values = 100.0 * np.asarray([r[key] for r in motion_records], dtype=np.float64)
+            means.append(np.mean(values))
+            stds.append(np.std(values))
+
+        ax.barh(y, means, xerr=stds)
+        ax.set_xlabel("RMSE [cm]")
+        ax.set_title(title)
+
+    axes[0].set_yticks(y, labels=motion_names)
+    axes[0].invert_yaxis()
+
+    scope = "Pre-relaxation" if "pre_relaxation_body_position_rmse_m" in records[0] else "Full-trajectory"
+    fig.suptitle(f"{scope} position tracking by trajectory")
+    fig.tight_layout()
+
+    return fig
+
+def _plot_orientation_tracking_by_motion(records: list[dict]):
+
+    records_by_motion = group_records_by_motion(records)
+    motion_names = list(records_by_motion)
+    specs = [
+        ("body_orientation_rmse_deg", "Body"),
+        ("cube_orientation_rmse_deg", "Cube"),
+    ]
+
+    y = np.arange(len(motion_names))
+    fig, axes = plt.subplots(1, 2, figsize=(14, max(5, 0.5 * len(motion_names))), sharey=True)
+
+    for ax, (base_key, title) in zip(axes, specs):
+        means, stds = [], []
+        for motion_name in motion_names:
+            motion_records = records_by_motion[motion_name]
+            key = _tracking_metric_key(motion_records, base_key)
+            values = np.asarray([r[key] for r in motion_records], dtype=np.float64)
+            means.append(np.mean(values))
+            stds.append(np.std(values))
+
+        ax.barh(y, means, xerr=stds)
+        ax.set_xlabel("RMSE [deg]")
+        ax.set_title(title)
+
+    axes[0].set_yticks(y, labels=motion_names)
+    axes[0].invert_yaxis()
+
+    scope = "Pre-relaxation" if "pre_relaxation_body_position_rmse_m" in records[0] else "Full-trajectory"
+    fig.suptitle(f"{scope} orientation tracking by trajectory")
+    fig.tight_layout()
+
     return fig
 
 #-------------------------------------------------------------------
-# Action smoothness
+# Contro metrics
 #---------------------------------------------------------------------
-
-def _plot_joint_torques(
-    trajectory_records: list[dict],
-    joint_names: list[str],
-):
-    frames, torque_mean, torque_std = _aggregate_by_frame(
-        trajectory_records,
-        "joint_torque_nm",
-    )
-
-    fig, axes = plt.subplots(3, 3, figsize=(14, 10), sharex=True)
-    axes = axes.flatten()
-
-    for i, (ax, joint_name) in enumerate(zip(axes, joint_names)):
-        mean = torque_mean[:, i]
-        std = torque_std[:, i]
-
-        line = ax.plot(frames, mean)[0]
-        ax.fill_between(
-            frames,
-            mean - std,
-            mean + std,
-            alpha=0.2,
-            color=line.get_color(),
-        )
-
-        ax.axhline(0.0, linewidth=0.8, linestyle="--")
-        ax.set_title(_pretty_name(joint_name))
-        ax.set_ylabel("Torque [Nm]")
-        ax.set_xlabel("Motion frame")
-
-    fig.suptitle("Approximate applied joint torque")
-    fig.tight_layout()
-
-    return fig
-
-def _plot_joint_action_smoothness(
-    trajectory_records: list[dict],
-    joint_names: list[str],
-):
-    frames, action_mean, action_std = _aggregate_by_frame(
-        trajectory_records,
-        "action_delta",
-    )
-
-    fig, axes = plt.subplots(3, 3, figsize=(14, 10), sharex=True)
-    axes = axes.flatten()
-
-    for i, (ax, joint_name) in enumerate(zip(axes, joint_names)):
-        mean = action_mean[:, i]
-        std = action_std[:, i]
-
-        line = ax.plot(frames, mean)[0]
-        ax.fill_between(
-            frames,
-            mean - std,
-            mean + std,
-            alpha=0.2,
-            color=line.get_color(),
-        )
-
-        ax.axhline(0.0, linewidth=0.8, linestyle="--")
-        ax.set_title(_pretty_name(joint_name))
-        ax.set_ylabel("Action Δ")
-        ax.set_xlabel("Motion frame")
-
-    fig.suptitle("Per-joint action change")
-    fig.tight_layout()
-
-    return fig
 
 def _plot_per_joint_control_metrics(
     records: list[dict],
@@ -507,6 +585,282 @@ def _plot_per_joint_control_metrics(
 
     fig.tight_layout()
     return fig
+
+def _plot_control_quality_overview(records: list[dict]):
+    torque_rms_nm = np.asarray(
+        [r["torque_rms_overall_nm"] for r in records],
+        dtype=np.float64,
+    )
+
+    action_delta_rms = np.asarray(
+        [r["action_delta_rms_overall"] for r in records],
+        dtype=np.float64,
+    )
+
+    components = [
+        (
+            "Overall torque RMS",
+            torque_rms_nm,
+            "Torque RMS [Nm]",
+        ),
+        (
+            "Overall action-delta RMS",
+            action_delta_rms,
+            "Action Δ RMS",
+        ),
+    ]
+
+    fig, axes = plt.subplots(1, 2, figsize=(10, 5))
+
+    for ax, (title, values, ylabel) in zip(axes, components):
+        ax.boxplot([values], widths=0.35)
+
+        x = np.linspace(
+            0.94,
+            1.06,
+            len(values),
+        )
+
+        ax.scatter(
+            x,
+            values,
+            alpha=0.5,
+        )
+
+        ax.set_xticks([])
+        ax.set_ylabel(ylabel)
+        ax.set_title(title)
+
+    fig.suptitle("Control-quality overview")
+    fig.tight_layout()
+
+    return fig
+
+def _plot_control_quality_by_motion(records: list[dict]):
+    records_by_motion = group_records_by_motion(records)
+    motion_names = list(records_by_motion.keys())
+
+    torque_mean_nm = []
+    torque_std_nm = []
+
+    action_delta_mean = []
+    action_delta_std = []
+
+    for motion_name in motion_names:
+        motion_records = records_by_motion[motion_name]
+
+        torque_values = np.asarray(
+            [
+                r["torque_rms_overall_nm"]
+                for r in motion_records
+            ],
+            dtype=np.float64,
+        )
+
+        action_delta_values = np.asarray(
+            [
+                r["action_delta_rms_overall"]
+                for r in motion_records
+            ],
+            dtype=np.float64,
+        )
+
+        torque_mean_nm.append(
+            np.mean(torque_values)
+        )
+        torque_std_nm.append(
+            np.std(torque_values)
+        )
+
+        action_delta_mean.append(
+            np.mean(action_delta_values)
+        )
+        action_delta_std.append(
+            np.std(action_delta_values)
+        )
+
+    y = np.arange(len(motion_names))
+
+    fig, axes = plt.subplots(
+        1,
+        2,
+        figsize=(14, max(5, 0.5 * len(motion_names))),
+        sharey=True,
+    )
+
+    axes[0].barh(
+        y,
+        torque_mean_nm,
+        xerr=torque_std_nm,
+    )
+
+    axes[0].set_yticks(
+        y,
+        labels=motion_names,
+    )
+    axes[0].invert_yaxis()
+    axes[0].set_xlabel("Overall torque RMS [Nm]")
+    axes[0].set_title("Torque effort")
+
+    axes[1].barh(
+        y,
+        action_delta_mean,
+        xerr=action_delta_std,
+    )
+
+    axes[1].set_xlabel("Overall action Δ RMS")
+    axes[1].set_title("Action smoothness")
+
+    fig.suptitle("Control quality by trajectory")
+    fig.tight_layout()
+
+    return fig
+
+def _make_extreme_torque_episode_table(
+    records: list[dict],
+    trajectory_records: list[dict],
+    joint_names: list[str],
+    joint_effort_limits_nm: list[float] | np.ndarray,
+    utilization_threshold: float,
+) -> wandb.Table:
+    records_by_episode = {
+        int(r["episode_id"]): r
+        for r in records
+    }
+
+    effort_limits = np.asarray(
+        joint_effort_limits_nm,
+        dtype=np.float64,
+    )
+
+    if effort_limits.shape != (len(joint_names),):
+        raise ValueError(
+            "joint_effort_limits_nm must have one value per controlled joint."
+        )
+
+    if (
+        not np.all(np.isfinite(effort_limits))
+        or np.any(effort_limits <= 0.0)
+    ):
+        raise ValueError(
+            "Joint effort limits must be finite and positive."
+        )
+
+    extreme_episodes = []
+
+    for trajectory in trajectory_records:
+        episode_id = int(
+            trajectory["episode_id"]
+        )
+
+        record = records_by_episode[
+            episode_id
+        ]
+
+        frames = np.asarray(
+            trajectory["motion_frame"],
+            dtype=np.int64,
+        )
+
+        torque_nm = np.asarray(
+            trajectory["joint_torque_nm"],
+            dtype=np.float64,
+        )
+
+        utilization = (
+            np.abs(torque_nm)
+            / effort_limits[None, :]
+        )
+
+        peak_flat_idx = int(
+            np.argmax(utilization)
+        )
+
+        peak_frame_idx, peak_joint_idx = (
+            np.unravel_index(
+                peak_flat_idx,
+                utilization.shape,
+            )
+        )
+
+        peak_utilization = float(
+            utilization[
+                peak_frame_idx,
+                peak_joint_idx,
+            ]
+        )
+
+        if peak_utilization < utilization_threshold:
+            continue
+
+        high_utilization_mask = (
+            utilization
+            >= utilization_threshold
+        )
+
+        high_utilization_frame_fraction = float(
+            np.mean(
+                np.any(
+                    high_utilization_mask,
+                    axis=1,
+                )
+            )
+        )
+
+        violating_joint_ids = np.flatnonzero(
+            np.any(
+                high_utilization_mask,
+                axis=0,
+            )
+        )
+
+        violating_joints = [
+            joint_names[i]
+            for i in violating_joint_ids
+        ]
+
+        extreme_episodes.append(
+            [
+                record["motion_name"],
+                episode_id,
+                int(frames[peak_frame_idx]),
+                joint_names[peak_joint_idx],
+                float(
+                    torque_nm[
+                        peak_frame_idx,
+                        peak_joint_idx,
+                    ]
+                ),
+                float(
+                    effort_limits[
+                        peak_joint_idx
+                    ]
+                ),
+                100.0 * peak_utilization,
+                100.0 * high_utilization_frame_fraction,
+                ", ".join(violating_joints),
+            ]
+        )
+
+    extreme_episodes.sort(
+        key=lambda row: row[6],
+        reverse=True,
+    )
+
+    return wandb.Table(
+        columns=[
+            "motion",
+            "episode",
+            "peak_frame",
+            "peak_joint",
+            "peak_torque_nm",
+            "joint_effort_limit_nm",
+            "peak_utilization_pct",
+            "high_utilization_frames_pct",
+            "joints_above_threshold",
+        ],
+        data=extreme_episodes,
+    )
 # -----------------------------------------------------------------------------
 # Final pose distribution.
 # -----------------------------------------------------------------------------
@@ -588,385 +942,415 @@ def _plot_final_xy_scatter(records: list[dict]):
     fig.tight_layout()
     return fig
 
+
 # -----------------------------------------------------------------------------
-# Combined diagnostic.
+# Deformation plots 
 # -----------------------------------------------------------------------------
 
-def _plot_hand_cube_deformation_torque_diagnostic(
-    trajectory_records: list[dict],
-    joint_names: list[str],
+def _plot_deformation_overview(
+    records: list[dict],
+    high_deformation_threshold_mm: float,
 ):
-    hand_frames, hand_mean, hand_std = _aggregate_by_frame(
-        trajectory_records,
-        "hand_position_error_m",
-    )
-    cube_frames, cube_delta_mean, cube_delta_std = _aggregate_by_frame(
-        trajectory_records,
-        "cube_position_delta_m",
-    )
-    ori_frames, ori_mean, ori_std = _aggregate_by_frame(
-        trajectory_records,
-        "cube_orientation_error_rad",
-    )
-    deformation_frames, deformation_rms_mean, deformation_rms_std = (
-        _aggregate_by_frame(
-            trajectory_records,
-            "deformation_rms_m",
-        )
-    )
-    p95_frames, deformation_p95_mean, deformation_p95_std = (
-        _aggregate_by_frame(
-            trajectory_records,
-            "deformation_p95_m",
-        )
-    )
-    torque_frames, torque_mean, torque_std = _aggregate_by_frame(
-        trajectory_records,
-        "joint_torque_nm",
-    )
+    deformation_mean_mm = 1000.0 * np.asarray([r["deformation_rms_mean_m"] for r in records], dtype=np.float64)
+    deformation_peak_mm = 1000.0 * np.asarray([r["deformation_rms_peak_m"] for r in records], dtype=np.float64)
+    high_deformation_pct = 100.0 * np.asarray([r["deformation_high_fraction"] for r in records], dtype=np.float64)
 
-    # Resting deformation reference from the initial settled part
-    # of the current evaluation trajectory.
-    rest = _compute_rest_deformation_reference(
-        trajectory_records,
-    )
+    components = [
+        ("Mean RMS deformation", deformation_mean_mm, "RMS deformation [mm]"),
+        ("Peak RMS deformation", deformation_peak_mm, "Peak RMS deformation [mm]"),
+        (f"High-deformation frames\n(RMS > {high_deformation_threshold_mm:g} mm)", high_deformation_pct, "Episode frames [%]"),
+    ]
 
-    hand_mean_cm = 100.0 * np.mean(hand_mean, axis=-1)
-    hand_std_cm = 100.0 * np.mean(hand_std, axis=-1)
+    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
 
-    cube_delta_mean_cm = 100.0 * cube_delta_mean
-    cube_delta_std_cm = 100.0 * cube_delta_std
+    for ax, (title, values, ylabel) in zip(axes, components):
+        ax.boxplot([values], widths=0.35)
+        x = np.linspace(0.94, 1.06, len(values))
+        ax.scatter(x, values, alpha=0.5)
 
-    ori_mean_deg = np.degrees(ori_mean)
-    ori_std_deg = np.degrees(ori_std)
+        ax.set_xticks([])
+        ax.set_title(title)
+        ax.set_ylabel(ylabel)
 
-    deformation_rms_mean_mm = 1000.0 * deformation_rms_mean
-    deformation_rms_std_mm = 1000.0 * deformation_rms_std
+    axes[2].set_ylim(bottom=0.0)
 
-    deformation_p95_mean_mm = 1000.0 * deformation_p95_mean
-    deformation_p95_std_mm = 1000.0 * deformation_p95_std
-
-    rest_rms_mm = 1000.0 * rest["rms_m"]
-    rest_p95_mm = 1000.0 * rest["p95_m"]
-
-    fig = plt.figure(figsize=(15, 20))
-    grid = fig.add_gridspec(
-        7,
-        3,
-        height_ratios=[
-            1.0,
-            1.0,
-            1.0,
-            1.0,
-            1.2,
-            1.2,
-            1.2,
-        ],
-    )
-
-    # ------------------------------------------------------------------
-    # Hand tracking.
-    # ------------------------------------------------------------------
-
-    ax = fig.add_subplot(grid[0, :])
-
-    line = ax.plot(
-        hand_frames,
-        hand_mean_cm,
-    )[0]
-
-    ax.fill_between(
-        hand_frames,
-        hand_mean_cm - hand_std_cm,
-        hand_mean_cm + hand_std_cm,
-        alpha=0.2,
-        color=line.get_color(),
-    )
-
-    ax.set_ylabel("Hand error [cm]")
-    ax.set_title(
-        "Hand / cube / deformation / torque diagnostic"
-    )
-
-    # ------------------------------------------------------------------
-    # Cube X/Y tracking.
-    # ------------------------------------------------------------------
-
-    ax = fig.add_subplot(grid[1, :])
-
-    for i, label in enumerate(("X", "Y")):
-        line = ax.plot(
-            cube_frames,
-            cube_delta_mean_cm[:, i],
-            label=label,
-        )[0]
-
-        ax.fill_between(
-            cube_frames,
-            cube_delta_mean_cm[:, i] - cube_delta_std_cm[:, i],
-            cube_delta_mean_cm[:, i] + cube_delta_std_cm[:, i],
-            alpha=0.15,
-            color=line.get_color(),
-        )
-
-    ax.axhline(
-        0.0,
-        linewidth=0.8,
-        linestyle="--",
-    )
-    ax.set_ylabel("Cube error [cm]")
-    ax.legend()
-
-    # ------------------------------------------------------------------
-    # Cube orientation tracking.
-    # ------------------------------------------------------------------
-
-    ax = fig.add_subplot(grid[2, :])
-
-    line = ax.plot(
-        ori_frames,
-        ori_mean_deg,
-    )[0]
-
-    ax.fill_between(
-        ori_frames,
-        ori_mean_deg - ori_std_deg,
-        ori_mean_deg + ori_std_deg,
-        alpha=0.2,
-        color=line.get_color(),
-    )
-
-    ax.set_ylabel("Cube orientation error [deg]")
-
-    # ------------------------------------------------------------------
-    # Deformation.
-    # ------------------------------------------------------------------
-
-    ax = fig.add_subplot(grid[3, :])
-
-    line = ax.plot(
-        deformation_frames,
-        deformation_rms_mean_mm,
-        label="RMS",
-    )[0]
-
-    ax.fill_between(
-        deformation_frames,
-        deformation_rms_mean_mm - deformation_rms_std_mm,
-        deformation_rms_mean_mm + deformation_rms_std_mm,
-        alpha=0.15,
-        color=line.get_color(),
-    )
-
-    line = ax.plot(
-        p95_frames,
-        deformation_p95_mean_mm,
-        label="P95",
-    )[0]
-
-    ax.fill_between(
-        p95_frames,
-        deformation_p95_mean_mm - deformation_p95_std_mm,
-        deformation_p95_mean_mm + deformation_p95_std_mm,
-        alpha=0.15,
-        color=line.get_color(),
-    )
-
-    ax.axhline(
-        rest_rms_mm,
-        linewidth=0.8,
-        linestyle="--",
-        label="Rest RMS",
-    )
-
-    ax.axhline(
-        rest_p95_mm,
-        linewidth=0.8,
-        linestyle=":",
-        label="Rest P95",
-    )
-
-    ax.set_ylabel("Deformation [mm]")
-    ax.legend(
-        ncol=4,
-        fontsize=8,
-    )
-
-    # ------------------------------------------------------------------
-    # Per-joint approximate applied torque.
-    # ------------------------------------------------------------------
-
-    for i, joint_name in enumerate(joint_names):
-        row = 4 + i // 3
-        col = i % 3
-
-        ax = fig.add_subplot(
-            grid[row, col],
-        )
-
-        mean = torque_mean[:, i]
-        std = torque_std[:, i]
-
-        line = ax.plot(
-            torque_frames,
-            mean,
-        )[0]
-
-        ax.fill_between(
-            torque_frames,
-            mean - std,
-            mean + std,
-            alpha=0.2,
-            color=line.get_color(),
-        )
-
-        ax.axhline(
-            0.0,
-            linewidth=0.8,
-            linestyle="--",
-        )
-
-        ax.set_title(
-            _pretty_name(joint_name)
-        )
-        ax.set_ylabel("Torque [Nm]")
-        ax.set_xlabel("Motion frame")
-
+    fig.suptitle("Deformable-object deformation overview")
     fig.tight_layout()
-
     return fig
 
-# -----------------------------------------------------------------------------
-# Deformable-object shape.
-# -----------------------------------------------------------------------------
+def _plot_deformation_by_motion(records: list[dict]):
+    records_by_motion = group_records_by_motion(records)
+    motion_names = list(records_by_motion.keys())
 
-def _plot_deformation(
-    trajectory_records: list[dict],
-):
-    frames, rms_mean, rms_std = _aggregate_by_frame(
-        trajectory_records,
-        "deformation_rms_m",
-    )
-    p95_frames, p95_mean, p95_std = _aggregate_by_frame(
-        trajectory_records,
-        "deformation_p95_m",
-    )
-    max_frames, max_mean, max_std = _aggregate_by_frame(
-        trajectory_records,
-        "deformation_max_m",
-    )
-    extent_frames, extent_mean, extent_std = _aggregate_by_frame(
-        trajectory_records,
-        "relative_extent_change",
-    )
-    rest = _compute_rest_deformation_reference(
-        trajectory_records,
-    )
+    mean_rms_mm = []
+    mean_rms_std_mm = []
 
+    peak_rms_mm = []
+    peak_rms_std_mm = []
 
-    rms_mean_mm = 1000.0 * rms_mean
-    rms_std_mm = 1000.0 * rms_std
-    p95_mean_mm = 1000.0 * p95_mean
-    p95_std_mm = 1000.0 * p95_std
-    max_mean_mm = 1000.0 * max_mean
-    max_std_mm = 1000.0 * max_std
+    high_fraction_pct = []
+    high_fraction_std_pct = []
 
-    extent_mean_pct = 100.0 * extent_mean
-    extent_std_pct = 100.0 * extent_std
+    for motion_name in motion_names:
+        motion_records = records_by_motion[motion_name]
 
-    rest_rms_mm = 1000.0 * rest["rms_m"]
-    rest_p95_mm = 1000.0 * rest["p95_m"]
-    rest_extent_pct = 100.0 * rest["extent_change"]
+        rms_values_mm = 1000.0 * np.asarray([r["deformation_rms_mean_m"] for r in motion_records], dtype=np.float64)
+        peak_values_mm = 1000.0 * np.asarray([r["deformation_rms_peak_m"] for r in motion_records], dtype=np.float64)
+        high_values_pct = 100.0 * np.asarray([r["deformation_high_fraction"] for r in motion_records], dtype=np.float64)
+
+        mean_rms_mm.append(np.mean(rms_values_mm))
+        mean_rms_std_mm.append(np.std(rms_values_mm))
+
+        peak_rms_mm.append(np.mean(peak_values_mm))
+        peak_rms_std_mm.append(np.std(peak_values_mm))
+
+        high_fraction_pct.append(np.mean(high_values_pct))
+        high_fraction_std_pct.append(np.std(high_values_pct))
+
+    y = np.arange(len(motion_names))
 
     fig, axes = plt.subplots(
-        2,
         1,
-        figsize=(11, 8),
-        sharex=True,
+        3,
+        figsize=(18, max(5, 0.5 * len(motion_names))),
+        sharey=True,
     )
 
-    # ------------------------------------------------------------------
-    # Rigid-motion-removed nodal deformation.
-    # ------------------------------------------------------------------
+    axes[0].barh(y, mean_rms_mm, xerr=mean_rms_std_mm)
+    axes[0].set_yticks(y, labels=motion_names)
+    axes[0].invert_yaxis()
+    axes[0].set_xlabel("Mean RMS deformation [mm]")
+    axes[0].set_title("Mean deformation")
 
-    for frame_values, mean, std, label in (
-        (frames, rms_mean_mm, rms_std_mm, "RMS"),
-        (p95_frames, p95_mean_mm, p95_std_mm, "P95"),
-        (max_frames, max_mean_mm, max_std_mm, "Max"),
-    ):
-        line = axes[0].plot(
-            frame_values,
-            mean,
-            label=label,
-        )[0]
+    axes[1].barh(y, peak_rms_mm, xerr=peak_rms_std_mm)
+    axes[1].set_xlabel("Episode peak RMS [mm]")
+    axes[1].set_title("Peak deformation")
 
-        axes[0].fill_between(
-            frame_values,
-            mean - std,
-            mean + std,
-            alpha=0.15,
-            color=line.get_color(),
-        )
+    axes[2].barh(y, high_fraction_pct, xerr=high_fraction_std_pct)
+    axes[2].set_xlabel("Episode frames [%]")
+    axes[2].set_title("High-deformation fraction")
 
-    axes[0].axhline(
-        rest_rms_mm,
-        linewidth=1.0,
-        linestyle="--",
-        label="Rest RMS",
-    )
-    axes[0].axhline(
-        rest_p95_mm,
-        linewidth=1.0,
-        linestyle=":",
-        label="Rest P95",
-    )
-
-    axes[0].set_title("Deformable-object shape")
-    axes[0].set_ylabel("Deformation [mm]")
-    axes[0].legend(ncol=5, fontsize=8)
-
-    # ------------------------------------------------------------------
-    # Material-frame extent change.
-    # ------------------------------------------------------------------
-
-    axis_labels = ("X", "Y", "Z")
-
-    for axis, label in enumerate(axis_labels):
-        line = axes[1].plot(
-            extent_frames,
-            extent_mean_pct[:, axis],
-            label=label,
-        )[0]
-
-        axes[1].fill_between(
-            extent_frames,
-            extent_mean_pct[:, axis] - extent_std_pct[:, axis],
-            extent_mean_pct[:, axis] + extent_std_pct[:, axis],
-            alpha=0.15,
-            color=line.get_color(),
-        )
-
-        axes[1].axhline(
-            rest_extent_pct[axis],
-            linewidth=0.8,
-            linestyle=":",
-            color=line.get_color(),
-        )
-
-    axes[1].axhline(
-        0.0,
-        linewidth=0.8,
-        linestyle="--",
-    )
-
-    axes[1].set_ylabel("Relative extent change [%]")
-    axes[1].set_xlabel("Motion frame")
-    axes[1].legend()
-
+    fig.suptitle("Deformation by trajectory")
     fig.tight_layout()
 
     return fig
 
+def _make_extreme_deformation_episode_table(
+    records: list[dict],
+    trajectory_records: list[dict],
+    severe_peak_threshold_mm: float,
+    sustained_high_fraction: float,
+    extreme_local_threshold_mm: float,
+) -> wandb.Table:
+    records_by_episode = {int(r["episode_id"]): r for r in records}
+    extreme_episodes = []
+
+    for trajectory in trajectory_records:
+        episode_id = int(trajectory["episode_id"])
+        record = records_by_episode[episode_id]
+
+        peak_rms_mm = 1000.0 * float(record["deformation_rms_peak_m"])
+        high_fraction = float(record["deformation_high_fraction"])
+        episode_max_mm = 1000.0 * float(record["deformation_max_peak_m"])
+
+        severe_peak = peak_rms_mm > severe_peak_threshold_mm
+        sustained = high_fraction > sustained_high_fraction
+        extreme_local = episode_max_mm > extreme_local_threshold_mm
+
+        if not (severe_peak or sustained or extreme_local):
+            continue
+
+        frames = np.asarray(trajectory["motion_frame"], dtype=np.int64)
+        rms_mm = 1000.0 * np.asarray(trajectory["deformation_rms_m"], dtype=np.float64)
+        p95_mm = 1000.0 * np.asarray(trajectory["deformation_p95_m"], dtype=np.float64)
+        max_mm = 1000.0 * np.asarray(trajectory["deformation_max_m"], dtype=np.float64)
+
+        peak_idx = int(np.argmax(rms_mm))
+
+        reasons = []
+        if severe_peak:
+            reasons.append("severe_peak")
+        if sustained:
+            reasons.append("sustained")
+        if extreme_local:
+            reasons.append("extreme_local")
+
+        extreme_episodes.append([
+            record["motion_name"],
+            episode_id,
+            int(frames[peak_idx]),
+            float(rms_mm[peak_idx]),
+            float(p95_mm[peak_idx]),
+            float(max_mm[peak_idx]),
+            float(100.0 * high_fraction),
+            episode_max_mm,
+            ", ".join(reasons),
+        ])
+
+    extreme_episodes.sort(key=lambda row: row[3], reverse=True)
+
+    return wandb.Table(
+        columns=[
+            "motion",
+            "episode",
+            "peak_rms_frame",
+            "peak_rms_mm",
+            "p95_at_peak_mm",
+            "max_at_peak_mm",
+            "high_deformation_pct",
+            "episode_max_nodal_mm",
+            "reason",
+        ],
+        data=extreme_episodes,
+    )
+
+#-----------------------------------------------------------------------------
+# Landing aware task
+#-----------------------------------------------------------------------------
+def _plot_landing_xy_scatter(
+    records: list[dict],
+    landing_center_xy: tuple[float, float],
+    landing_radius: float,
+):
+    records_by_motion = group_records_by_motion(records)
+
+    center_x_cm = 100.0 * landing_center_xy[0]
+    center_y_cm = 100.0 * landing_center_xy[1]
+    radius_cm = 100.0 * landing_radius
+
+    fig, ax = plt.subplots(figsize=(7, 7))
+
+    all_x = []
+    all_y = []
+
+    for motion_name, motion_records in records_by_motion.items():
+        x_cm = 100.0 * np.asarray([r["final_cube_x_r0_m"] for r in motion_records])
+        y_cm = 100.0 * np.asarray([r["final_cube_y_r0_m"] for r in motion_records])
+
+        scatter = ax.scatter(x_cm, y_cm, label=motion_name)
+        color = scatter.get_facecolor()[0]
+
+        reference_x_cm = 100.0 * motion_records[0]["reference_final_cube_x_r0_m"]
+        reference_y_cm = 100.0 * motion_records[0]["reference_final_cube_y_r0_m"]
+
+        ax.scatter(reference_x_cm, reference_y_cm, marker="x", s=100, linewidths=2.0, color=color)
+
+        all_x.extend(x_cm.tolist())
+        all_y.extend(y_cm.tolist())
+        all_x.append(reference_x_cm)
+        all_y.append(reference_y_cm)
+
+    landing_circle = plt.Circle(
+        (center_x_cm, center_y_cm),
+        radius_cm,
+        fill=False,
+        linestyle="--",
+        linewidth=2.0,
+    )
+    ax.add_patch(landing_circle)
+
+    ax.scatter([], [], marker="x", s=100, linewidths=2.0, label="Final reference")
+    ax.scatter(center_x_cm, center_y_cm, marker="+", s=100, label="Landing center")
+
+    all_x.extend([center_x_cm - radius_cm, center_x_cm + radius_cm])
+    all_y.extend([center_y_cm - radius_cm, center_y_cm + radius_cm])
+
+    x_min, x_max = min(all_x), max(all_x)
+    y_min, y_max = min(all_y), max(all_y)
+
+    span = max(x_max - x_min, y_max - y_min, 2.0 * radius_cm)
+    padding = 0.15 * span
+
+    center_plot_x = 0.5 * (x_min + x_max)
+    center_plot_y = 0.5 * (y_min + y_max)
+
+    ax.set_xlim(center_plot_x - 0.5 * span - padding, center_plot_x + 0.5 * span + padding)
+    ax.set_ylim(center_plot_y - 0.5 * span - padding, center_plot_y + 0.5 * span + padding)
+
+    ax.set_aspect("equal", adjustable="box")
+    ax.set_xlabel("Cube X in R0 [cm]")
+    ax.set_ylabel("Cube Y in R0 [cm]")
+    ax.set_title("Terminal cube landing positions")
+    ax.legend(fontsize=8)
+
+    fig.tight_layout()
+    return fig
+
+def _plot_landing_improvement_overview(records: list[dict]):
+    position_labels, orientation_labels, combined_labels, success_labels = _landing_improvement_labels(records)
+
+    pie_specs = [
+        ("Position vs reference", position_labels, ["Better", "Same", "Worse"]),
+        ("Orientation vs reference", orientation_labels, ["Better", "Same", "Worse"]),
+        ("Combined improvement", combined_labels, ["Improved", "Mixed", "Same", "Worse"]),
+        ("Landing success conversion", success_labels, ["Kept success", "Failure→success", "Success→failure", "Kept failure"]),
+    ]
+
+    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+    axes = axes.flatten()
+
+    for ax, (title, labels, categories) in zip(axes, pie_specs):
+        counts = _count_categories(labels, categories)
+
+        if np.sum(counts) == 0:
+            ax.axis("off")
+            continue
+
+        ax.pie(
+            counts,
+            labels=categories,
+            autopct=lambda pct: f"{pct:.1f}%",
+            startangle=90,
+        )
+        ax.set_title(title)
+
+    fig.suptitle("Landing improvement overview")
+    fig.tight_layout()
+    return fig
+
+def _plot_landing_improvement_by_motion(records: list[dict]):
+    
+    records_by_motion = group_records_by_motion(records)
+    motion_names = list(records_by_motion.keys())
+
+    position_categories = ["Better", "Same", "Worse"]
+    orientation_categories = ["Better", "Same", "Worse"]
+    combined_categories = ["Improved", "Mixed", "Same", "Worse"]
+
+    position_pct = []
+    orientation_pct = []
+    combined_pct = []
+
+    for motion_name in motion_names:
+        motion_records = records_by_motion[motion_name]
+
+        position_labels, orientation_labels, combined_labels, _ = _landing_improvement_labels(
+            motion_records,
+        )
+
+        position_counts = _count_categories(position_labels, position_categories)
+        orientation_counts = _count_categories(orientation_labels, orientation_categories)
+        combined_counts = _count_categories(combined_labels, combined_categories)
+
+        position_pct.append(100.0 * position_counts / np.sum(position_counts))
+        orientation_pct.append(100.0 * orientation_counts / np.sum(orientation_counts))
+        combined_pct.append(100.0 * combined_counts / np.sum(combined_counts))
+
+    position_pct = np.asarray(position_pct, dtype=np.float64)
+    orientation_pct = np.asarray(orientation_pct, dtype=np.float64)
+    combined_pct = np.asarray(combined_pct, dtype=np.float64)
+
+    y = np.arange(len(motion_names))
+    fig, axes = plt.subplots(1, 3, figsize=(18, max(5, 0.5 * len(motion_names))), sharey=True)
+
+    left = np.zeros(len(motion_names), dtype=np.float64)
+    for idx, category in enumerate(position_categories):
+        values = position_pct[:, idx]
+        axes[0].barh(y, values, left=left, label=category)
+        left += values
+    axes[0].set_yticks(y, labels=motion_names)
+    axes[0].invert_yaxis()
+    axes[0].set_xlim(0.0, 100.0)
+    axes[0].set_xlabel("Episodes [%]")
+    axes[0].set_title("Position improvement")
+
+    left = np.zeros(len(motion_names), dtype=np.float64)
+    for idx, category in enumerate(orientation_categories):
+        values = orientation_pct[:, idx]
+        axes[1].barh(y, values, left=left, label=category)
+        left += values
+    axes[1].set_xlim(0.0, 100.0)
+    axes[1].set_xlabel("Episodes [%]")
+    axes[1].set_title("Orientation improvement")
+
+    left = np.zeros(len(motion_names), dtype=np.float64)
+    for idx, category in enumerate(combined_categories):
+        values = combined_pct[:, idx]
+        axes[2].barh(y, values, left=left, label=category)
+        left += values
+    axes[2].set_xlim(0.0, 100.0)
+    axes[2].set_xlabel("Episodes [%]")
+    axes[2].set_title("Combined improvement")
+
+    axes[0].legend(fontsize=8)
+    axes[1].legend(fontsize=8)
+    axes[2].legend(fontsize=8)
+
+    fig.tight_layout()
+    return fig
+
+def _plot_landing_quality_overview(records: list[dict], orientation_success_threshold_deg: float):
+
+    position_reference_cm = 100.0 * np.asarray([r["reference_landing_xy_error_m"] for r in records], dtype=np.float64)
+    position_policy_cm = 100.0 * np.asarray([r["final_landing_xy_error_m"] for r in records], dtype=np.float64)
+    orientation_reference_deg = np.asarray([r["reference_landing_orientation_error_deg"] for r in records], dtype=np.float64)
+    orientation_policy_deg = np.asarray([r["final_landing_orientation_error_deg"] for r in records], dtype=np.float64)
+
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+
+    position_data = [position_reference_cm, position_policy_cm]
+    orientation_data = [orientation_reference_deg, orientation_policy_deg]
+    position_labels = ["Reference", "Policy"]
+    orientation_labels = ["Reference", "Policy"]
+
+    axes[0].boxplot(position_data, labels=position_labels, widths=0.5)
+    for i, values in enumerate(position_data, start=1):
+        x = np.linspace(i - 0.08, i + 0.08, len(values))
+        axes[0].scatter(x, values, alpha=0.5)
+    axes[0].axhline(0.0, linewidth=0.8, linestyle="--")
+    axes[0].set_ylabel("Landing XY error [cm]")
+    axes[0].set_title("Landing position quality")
+
+    axes[1].boxplot(orientation_data, labels=orientation_labels, widths=0.5)
+    for i, values in enumerate(orientation_data, start=1):
+        x = np.linspace(i - 0.08, i + 0.08, len(values))
+        axes[1].scatter(x, values, alpha=0.5)
+    axes[1].axhline(orientation_success_threshold_deg, linewidth=1.0, linestyle="--", label=f"Success threshold ({orientation_success_threshold_deg:.1f}°)")
+    axes[1].set_ylabel("Canonical orientation error [deg]")
+    axes[1].set_title("Landing orientation quality")
+    axes[1].legend(fontsize=8)
+
+    fig.tight_layout()
+    return fig
+
+def _plot_landing_improvement_magnitude_by_motion(records: list[dict]):
+    records_by_motion = group_records_by_motion(records)
+    motion_names = list(records_by_motion.keys())
+
+    position_mean_cm = []
+    position_std_cm = []
+    orientation_mean_deg = []
+    orientation_std_deg = []
+
+    for motion_name in motion_names:
+        motion_records = records_by_motion[motion_name]
+        position_values_cm = 100.0 * np.asarray([r["landing_position_improvement_m"] for r in motion_records], dtype=np.float64)
+        orientation_values_deg = np.asarray([r["landing_orientation_improvement_deg"] for r in motion_records], dtype=np.float64)
+
+        position_mean_cm.append(np.mean(position_values_cm))
+        position_std_cm.append(np.std(position_values_cm))
+        orientation_mean_deg.append(np.mean(orientation_values_deg))
+        orientation_std_deg.append(np.std(orientation_values_deg))
+
+    y = np.arange(len(motion_names))
+    fig, axes = plt.subplots(1, 2, figsize=(14, max(5, 0.5 * len(motion_names))), sharey=True)
+
+    axes[0].barh(y, position_mean_cm, xerr=position_std_cm)
+    axes[0].axvline(0.0, linewidth=0.8, linestyle="--")
+    axes[0].set_yticks(y, labels=motion_names)
+    axes[0].invert_yaxis()
+    axes[0].set_xlabel("Position improvement [cm]")
+    axes[0].set_title("Landing position improvement by trajectory")
+
+    axes[1].barh(y, orientation_mean_deg, xerr=orientation_std_deg)
+    axes[1].axvline(0.0, linewidth=0.8, linestyle="--")
+    axes[1].set_yticks(y, labels=motion_names)
+    axes[1].invert_yaxis()
+    axes[1].set_xlabel("Orientation improvement [deg]")
+    axes[1].set_title("Landing orientation improvement by trajectory")
+
+    fig.tight_layout()
+    return fig
 # -----------------------------------------------------------------------------
 # Public W&B logging entry point.
 # -----------------------------------------------------------------------------
@@ -976,6 +1360,16 @@ def log_evaluation_visualizations(
     records: list[dict],
     trajectory_records: list[dict],
     joint_names: list[str],
+    joint_effort_limits_nm: list[float] | np.ndarray,
+    torque_utilization_threshold: float,
+    per_motion_summary: dict[str, dict[str, float]],
+    high_deformation_threshold_mm: float,
+    severe_deformation_peak_threshold_mm: float,
+    sustained_high_deformation_fraction: float,
+    extreme_local_deformation_threshold_mm: float,
+    landing_center_xy: tuple[float, float] | None = None,
+    landing_radius: float | None = None,
+    orientation_success_threshold_deg: float | None = None,
 ) -> None:
     """Log compact evaluation tables and diagnostic plots to W&B."""
 
@@ -989,178 +1383,112 @@ def log_evaluation_visualizations(
 
     episode_table = _make_episode_table(records)
     aggregate_table = _make_aggregate_table(records)
+    per_motion_table = make_per_motion_summary_table(per_motion_summary)
     termination_chart = _make_termination_chart(records)
-    cube_tracking_fig = _plot_cube_tracking(trajectory_records)
-    final_pose_fig = _plot_final_pose_components(records)
-    final_xy_fig = _plot_final_xy_scatter(records)
-    body_tracking_fig = _plot_body_tracking(trajectory_records)
-    hand_tracking_fig = _plot_hand_tracking(trajectory_records)
     body_rmse_fig = _plot_per_body_rmse(records)
-    joint_torque_fig = _plot_joint_torques(trajectory_records,joint_names)
-    action_smoothness_fig = _plot_joint_action_smoothness(trajectory_records,joint_names)
+    tracking_overview_fig = _plot_tracking_quality_overview(records)
+    position_tracking_by_motion_fig = _plot_position_tracking_by_motion(records)
+    orientation_tracking_by_motion_fig = _plot_orientation_tracking_by_motion(records)
     control_summary_fig = _plot_per_joint_control_metrics(records,joint_names)
-    deformation_fig = _plot_deformation(trajectory_records,)
-    diagnostic_fig = _plot_hand_cube_deformation_torque_diagnostic(trajectory_records,joint_names)
+    control_overview_fig = _plot_control_quality_overview(records)
+    control_by_motion_fig = _plot_control_quality_by_motion(records)
+    extreme_torque_table = (
+        _make_extreme_torque_episode_table(
+            records=records,
+            trajectory_records=trajectory_records,
+            joint_names=joint_names,
+            joint_effort_limits_nm=joint_effort_limits_nm,
+            utilization_threshold=torque_utilization_threshold,
+        )
+    )
+    deformation_overview_fig = _plot_deformation_overview(records,high_deformation_threshold_mm=high_deformation_threshold_mm)
+    deformation_by_motion_fig = _plot_deformation_by_motion(records)
+    extreme_deformation_table = _make_extreme_deformation_episode_table(
+        records=records,
+        trajectory_records=trajectory_records,
+        severe_peak_threshold_mm=severe_deformation_peak_threshold_mm,
+        sustained_high_fraction=sustained_high_deformation_fraction,
+        extreme_local_threshold_mm=extreme_local_deformation_threshold_mm,
+    )
 
-    run.log(
-        {
+    log_data = {
             # Summary.
             "evaluation_summary/episodes": episode_table,
             "evaluation_summary/aggregate": aggregate_table,
             "evaluation_summary/terminations": termination_chart,
+            "evaluation_summary/per_motion": per_motion_table,
 
-            # Cube/task.
-            "evaluation_cube/trajectory_tracking": wandb.Image(cube_tracking_fig),
-            "evaluation_cube/final_pose_components": wandb.Image(final_pose_fig),
-            "evaluation_cube/final_xy_scatter": wandb.Image(final_xy_fig),
-
-            # Robot Cartesian tracking.
-            "evaluation_robot/body_tracking": wandb.Image(body_tracking_fig),
-            "evaluation_robot/hand_tracking": wandb.Image(hand_tracking_fig),
-            "evaluation_robot/per_body_rmse": wandb.Image(body_rmse_fig),
+            # Cartesian tracking.
+            "evaluation_tracking/per_body_rmse": wandb.Image(body_rmse_fig),
+            "evaluation_tracking/overview": wandb.Image(tracking_overview_fig),
+            "evaluation_tracking/position_by_motion": wandb.Image(position_tracking_by_motion_fig),
+            "evaluation_tracking/orientation_by_motion": wandb.Image(orientation_tracking_by_motion_fig),
 
             # Control.
-            "evaluation_control/joint_torques": wandb.Image(joint_torque_fig),
-            "evaluation_control/action_smoothness": wandb.Image(action_smoothness_fig),
             "evaluation_control/per_joint_summary": wandb.Image(control_summary_fig),
-
+            "evaluation_control/overview": wandb.Image(control_overview_fig),
+            "evaluation_control/by_motion": wandb.Image(control_by_motion_fig),
+            "evaluation_control/extreme_torque_episode": extreme_torque_table,
+          
             # Deformation.
-            "evaluation_deformation/shape": wandb.Image(deformation_fig),
-
-            # Combined diagnostic.
-            "evaluation_diagnostics/hand_cube_deformation_torque": wandb.Image(diagnostic_fig),
+            "evaluation_deformation/overview": wandb.Image(deformation_overview_fig),
+            "evaluation_deformation/by_motion": wandb.Image(deformation_by_motion_fig),
+            "evaluation_deformation/extreme_episodes": extreme_deformation_table,
+           
         }
-    )
+    
+    #Landing aware plots 
+
+    landing_aware = landing_center_xy is not None
+    if landing_aware and orientation_success_threshold_deg is None:
+        raise ValueError("orientation_success_threshold_deg is required for LandingAware visualization.")
+
+    if landing_aware:
+        
+        final_xy_fig = _plot_landing_xy_scatter(
+            records=records,
+            landing_center_xy=landing_center_xy,
+            landing_radius=landing_radius,
+        )
+        landing_improvement_overview_fig = _plot_landing_improvement_overview(records)
+        landing_improvement_by_motion_fig = _plot_landing_improvement_by_motion(records)
+        landing_quality_fig = _plot_landing_quality_overview(records, orientation_success_threshold_deg=orientation_success_threshold_deg)
+        landing_improvement_magnitude_fig = _plot_landing_improvement_magnitude_by_motion(records)
+
+        log_data["evaluation_landing/final_xy"] = wandb.Image(final_xy_fig)
+        log_data["evaluation_landing/improvement_overview"] = wandb.Image(landing_improvement_overview_fig)
+        log_data["evaluation_landing/improvement_by_motion"] = wandb.Image(landing_improvement_by_motion_fig)
+        log_data["evaluation_landing/quality_overview"] = wandb.Image(landing_quality_fig)
+        log_data["evaluation_landing/improvement_magnitude_by_motion"] = wandb.Image(landing_improvement_magnitude_fig)
+    else:
+        final_xy_fig = _plot_final_xy_scatter(records)
+        final_pose_fig = _plot_final_pose_components(records)
+        log_data["evaluation_cube/final_xy_reference_error"] = wandb.Image(final_xy_fig)
+        log_data["evaluation_cube/final_pose_components"] = wandb.Image(final_pose_fig)
+
+    run.log(log_data)
 
     figures = [
-        cube_tracking_fig,
-        final_pose_fig,
         final_xy_fig,
-        body_tracking_fig,
-        hand_tracking_fig,
         body_rmse_fig,
-        joint_torque_fig,
-        action_smoothness_fig,
+        tracking_overview_fig,
+        position_tracking_by_motion_fig,
+        orientation_tracking_by_motion_fig,
         control_summary_fig,
-        deformation_fig,
-        diagnostic_fig,
+        control_overview_fig,
+        control_by_motion_fig,
+        deformation_overview_fig,
+        deformation_by_motion_fig,
     ]
+
+    if landing_aware:
+        figures.append(landing_improvement_overview_fig)
+        figures.append(landing_improvement_by_motion_fig)
+        figures.append(landing_quality_fig)
+        figures.append(landing_improvement_magnitude_fig)
+    else:
+        figures.append(final_pose_fig)
 
     for fig in figures:
         plt.close(fig)
 
-#-----------------------------
-#Wandb native
-#------------------------------
-def log_comparison_timeseries(
-    run,
-    trajectory_records: list[dict],
-    joint_names: list[str],
-) -> None:
-    """Log a small set of native W&B curves for cross-run comparison."""
-
-    frames, cube_delta, _ = _aggregate_by_frame(
-        trajectory_records, "cube_position_delta_m"
-    )
-    _, cube_orientation, _ = _aggregate_by_frame(
-        trajectory_records, "cube_orientation_error_rad"
-    )
-    _, hand_error, _ = _aggregate_by_frame(
-        trajectory_records, "hand_position_error_m"
-    )
-    _, body_position, _ = _aggregate_by_frame(
-        trajectory_records, "body_position_error_m"
-    )
-    _, body_orientation, _ = _aggregate_by_frame(
-        trajectory_records, "body_orientation_error_rad"
-    )
-    _, torque_mean, _ = _aggregate_by_frame(
-        trajectory_records, "joint_torque_nm"
-    )
-    _, action_delta_mean, _ = _aggregate_by_frame(
-        trajectory_records, "action_delta"
-    )
-    _, deformation_rms, _ = _aggregate_by_frame(
-        trajectory_records,
-        "deformation_rms_m",
-    )
-    _, deformation_p95, _ = _aggregate_by_frame(
-        trajectory_records,
-        "deformation_p95_m",
-    )
-    _, deformation_max, _ = _aggregate_by_frame(
-        trajectory_records,
-        "deformation_max_m",
-    )
-    _, extent_change, _ = _aggregate_by_frame(
-        trajectory_records,
-        "relative_extent_change",
-    )
-
-    run.define_metric("evaluation_frame")
-    run.define_metric(
-        "evaluation_comparison/*",
-        step_metric="evaluation_frame",
-    )
-    run.define_metric(
-        "evaluation_torque/*",
-        step_metric="evaluation_frame",
-    )
-    run.define_metric(
-        "evaluation_action_delta/*",
-        step_metric="evaluation_frame",
-    )
-    run.define_metric(
-        "evaluation_deformation/*",
-        step_metric="evaluation_frame",
-    )
-
-    for index, frame in enumerate(frames):
-        row = {
-            "evaluation_frame": int(frame),
-
-            "evaluation_comparison/cube_x_error_cm":
-                float(100.0 * cube_delta[index, 0]),
-
-            "evaluation_comparison/cube_y_error_cm":
-                float(100.0 * cube_delta[index, 1]),
-
-            "evaluation_comparison/cube_orientation_error_deg":
-                float(np.degrees(cube_orientation[index])),
-
-            "evaluation_comparison/hand_position_error_cm":
-                float(100.0 * np.mean(hand_error[index])),
-
-            "evaluation_comparison/body_position_error_cm":
-                float(100.0 * np.mean(body_position[index])),
-
-            "evaluation_comparison/body_orientation_error_deg":
-                float(np.degrees(np.mean(body_orientation[index]))),
-            "evaluation_deformation/rms_mm":
-                float(1000.0 * deformation_rms[index]),
-
-            "evaluation_deformation/p95_mm":
-                float(1000.0 * deformation_p95[index]),
-
-            "evaluation_deformation/max_mm":
-                float(1000.0 * deformation_max[index]),
-
-            "evaluation_deformation/extent_x_pct":
-                float(100.0 * extent_change[index, 0]),
-
-            "evaluation_deformation/extent_y_pct":
-                float(100.0 * extent_change[index, 1]),
-
-            "evaluation_deformation/extent_z_pct":
-                float(100.0 * extent_change[index, 2]),
-        }
-
-        for joint_idx, joint_name in enumerate(joint_names):
-            row[f"evaluation_torque/{joint_name}_nm"] = float(
-                torque_mean[index, joint_idx]
-            )
-            row[f"evaluation_action_delta/{joint_name}"] = float(
-                action_delta_mean[index, joint_idx]
-            )
-
-        run.log(row)

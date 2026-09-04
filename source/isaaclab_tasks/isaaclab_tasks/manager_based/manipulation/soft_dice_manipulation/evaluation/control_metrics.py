@@ -12,21 +12,21 @@ def compute_control_quality_metrics(
     action_delta: torch.Tensor,
     joint_names: list[str],
 ) -> dict[str, torch.Tensor]:
-    """Compute per-joint torque usage and action smoothness metrics."""
+    """Compute episode-level control effort and per-joint RMS metrics."""
+
+    torque_rms_overall = _rms(joint_torque_nm, dim=(0, 1))
+    action_delta_rms_overall = _rms(action_delta, dim=(0, 1))
 
     torque_rms = _rms(joint_torque_nm, dim=0)
-    torque_peak = torch.max(torch.abs(joint_torque_nm), dim=0).values
-
     action_delta_rms = _rms(action_delta, dim=0)
-    action_delta_peak = torch.max(torch.abs(action_delta), dim=0).values
 
-    metrics = {}
+    metrics = {
+        "torque_rms_overall_nm": torque_rms_overall,
+        "action_delta_rms_overall": action_delta_rms_overall,
+    }
 
     for i, joint_name in enumerate(joint_names):
         metrics[f"torque_rms_{joint_name}_nm"] = torque_rms[i]
-        metrics[f"torque_peak_abs_{joint_name}_nm"] = torque_peak[i]
-
         metrics[f"action_delta_rms_{joint_name}"] = action_delta_rms[i]
-        metrics[f"action_delta_peak_abs_{joint_name}"] = action_delta_peak[i]
 
     return metrics

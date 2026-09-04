@@ -29,7 +29,38 @@ parser.add_argument(
     type=str,
     default="Isaac-Soft-Dice-Tracking-H1-Eval-v0",
 )
-parser.add_argument("--motion_file", type=str, required=True)
+motion_group = parser.add_mutually_exclusive_group(required=True)
+
+motion_group.add_argument(
+    "--motion_file",
+    type=str,
+    default=None,
+    help="Evaluate one reference trajectory.",
+)
+
+motion_group.add_argument(
+    "--motion_dir",
+    type=str,
+    default=None,
+    help="Evaluate all matching trajectories in a directory.",
+)
+
+parser.add_argument(
+    "--motion_pattern",
+    type=str,
+    default="Traj*_fps50.npz",
+    help="Glob pattern used with --motion_dir.",
+)
+
+parser.add_argument(
+    "--episodes_per_motion",
+    type=int,
+    default=None,
+    help=(
+        "Number of accepted episodes for each trajectory "
+        "when using --motion_dir."
+    ),
+)
 parser.add_argument("--num_envs", type=int, default=4)
 parser.add_argument("--num_episodes", type=int, default=8)
 parser.add_argument("--seed", type=int, default=42)
@@ -57,6 +88,44 @@ parser.add_argument(
 
 # Evaluation outputs.
 parser.add_argument("--output_dir", type=str, default=None)
+
+#Evaluatios parameters
+parser.add_argument(
+    "--high_deformation_threshold_mm",
+    type=float,
+    default=10.0,
+    help="RMS deformation threshold used to classify high-deformation frames.",
+)
+parser.add_argument(
+    "--position_improvement_threshold_mm",
+    type=float,
+    default=5.0,
+    help="Minimum landing-position improvement required to classify an episode as meaningfully better or worse.",
+)
+parser.add_argument(
+    "--orientation_improvement_threshold_deg",
+    type=float,
+    default=2.0,
+    help="Minimum landing-orientation improvement required to classify an episode as meaningfully better or worse.",
+)
+parser.add_argument(
+    "--sustained_high_deformation_fraction",
+    type=float,
+    default=0.20,
+    help="Episode is flagged as sustained deformation if this fraction of frames exceeds the high-deformation RMS threshold.",
+)
+parser.add_argument(
+    "--extreme_local_deformation_threshold_mm",
+    type=float,
+    default=40.0,
+    help="Episode is flagged if maximum local nodal deformation exceeds this value.",
+)
+parser.add_argument(
+    "--torque_utilization_threshold",
+    type=float,
+    default=0.90,
+    help="Episode is flagged if any controlled joint reaches this fraction of its effort limit.",
+)
 
 # W&B.
 parser.add_argument("--wandb_project", type=str, default="soft_dice_thesis")
@@ -97,11 +166,13 @@ from isaaclab_tasks.manager_based.manipulation.soft_dice_manipulation.evaluation
     compute_cartesian_trajectory_metrics,
     compute_control_quality_metrics,
     compute_terminal_cube_pose_metrics,
+    compute_terminal_cube_landing_metrics,
+    compute_terminal_task_success_metrics,
     compute_deformation_metrics,
 )
 from isaaclab_tasks.manager_based.manipulation.soft_dice_manipulation.evaluation.visualization import (
     compute_main_metric_summary,
-    log_comparison_timeseries,
+    compute_per_motion_metric_summary,
     log_evaluation_visualizations,
 )
 
@@ -160,6 +231,7 @@ def write_results(
     config: dict,
     records: list[dict],
     summary: dict,
+    per_motion_summary: dict,
 ) -> tuple[str, str]:
     os.makedirs(output_dir, exist_ok=True)
 
@@ -177,6 +249,7 @@ def write_results(
             {
                 "config": config,
                 "summary": summary,
+                "per_motion_summary": per_motion_summary,
                 "episodes": records,
             },
             f,
@@ -190,11 +263,83 @@ def write_results(
 # -----------------------------------------------------------------------------
 
 def main():
-    if args_cli.num_episodes <= 0:
-        raise ValueError("--num_episodes must be > 0.")
-
     if args_cli.num_envs <= 0:
-        raise ValueError("--num_envs must be > 0.")
+        raise ValueError(
+            "--num_envs must be > 0."
+        )
+    if args_cli.high_deformation_threshold_mm <= 0.0:
+        raise ValueError("--high_deformation_threshold_mm must be > 0.")
+    if args_cli.position_improvement_threshold_mm < 0.0:
+        raise ValueError("--position_improvement_threshold_mm must be >= 0.")
+    if args_cli.orientation_improvement_threshold_deg < 0.0:
+        raise ValueError("--orientation_improvement_threshold_deg must be >= 0.")
+    if not 0.0 <= args_cli.sustained_high_deformation_fraction <= 1.0:
+        raise ValueError("--sustained_high_deformation_fraction must be between 0 and 1.")
+    if args_cli.extreme_local_deformation_threshold_mm <= 0.0:
+        raise ValueError("--extreme_local_deformation_threshold_mm must be > 0.")
+    if not 0.0 < args_cli.torque_utilization_threshold <= 1.0:
+        raise ValueError("--torque_utilization_threshold must be in (0, 1].")
+    
+    position_improvement_threshold_m = 0.001 * float(args_cli.position_improvement_threshold_mm)
+    orientation_improvement_threshold_deg = float(args_cli.orientation_improvement_threshold_deg)
+    severe_deformation_peak_threshold_mm = 2.0 * float(args_cli.high_deformation_threshold_mm)
+
+    if args_cli.motion_file is not None:
+
+        if args_cli.num_episodes <= 0:
+            raise ValueError(
+                "--num_episodes must be > 0."
+            )
+
+        motion_paths = [Path(args_cli.motion_file).expanduser().resolve()]
+
+        target_episodes_per_motion = {motion_paths[0].stem: int(args_cli.num_episodes)}
+
+    else:
+
+        if (
+            args_cli.episodes_per_motion is None
+            or args_cli.episodes_per_motion <= 0
+        ):
+            raise ValueError(
+                "--episodes_per_motion must be > 0 "
+                "when using --motion_dir."
+            )
+
+        motion_dir = (Path(args_cli.motion_dir).expanduser().resolve())
+
+        motion_paths = sorted(
+            path
+            for path in motion_dir.glob(
+                args_cli.motion_pattern
+            )
+            if path.is_file()
+        )
+
+        if not motion_paths:
+            raise FileNotFoundError(
+                "No trajectories matching "
+                f"{args_cli.motion_pattern!r} "
+                f"in {motion_dir}"
+            )
+
+        target_episodes_per_motion = {
+            path.stem: int(
+                args_cli.episodes_per_motion
+            )
+            for path in motion_paths
+        }
+
+
+    total_target_episodes = sum(target_episodes_per_motion.values())
+
+    print(
+        f"[INFO] Evaluating {len(motion_paths)} motions, "
+        f"{total_target_episodes} total accepted episodes."
+    )
+
+    for path in motion_paths:
+        print(f"  - {path.name}")
 
     # -------------------------------------------------------------------------
     # Load registered configurations.
@@ -221,7 +366,7 @@ def main():
 
     env_cfg.scene.num_envs = min(
         int(args_cli.num_envs),
-        int(args_cli.num_episodes),
+        int(total_target_episodes),
     )
     env_cfg.seed = int(args_cli.seed)
 
@@ -229,11 +374,43 @@ def main():
         env_cfg.sim.device = args_cli.device
         agent_cfg.device = args_cli.device
 
-    env_cfg.commands.motion.motion_file = str(args_cli.motion_file)
+    if args_cli.motion_file is not None:
+
+        env_cfg.commands.motion.motion_file = str(
+            motion_paths[0]
+        )
+
+        env_cfg.commands.motion.motion_dir = ""
+
+    else:
+
+        env_cfg.commands.motion.motion_file = ""
+
+        env_cfg.commands.motion.motion_dir = str(
+            Path(args_cli.motion_dir)
+            .expanduser()
+            .resolve()
+        )
+
+        env_cfg.commands.motion.motion_pattern = (args_cli.motion_pattern)
+
+    env_cfg.commands.motion.motion_sampling = ("balanced")
     env_cfg.commands.motion.loop = False
 
     # Resolve trajectory-dependent scene geometry.
     env_cfg.validate_config()
+
+    # Get landing region information from the registered task
+    landing_position_cfg = getattr(env_cfg.rewards, "landing_position", None)
+
+    if landing_position_cfg is not None:
+        landing_center_xy = tuple(landing_position_cfg.params["goal_xy"])
+        landing_radius = float(landing_position_cfg.params["radius"])
+        orientation_success_threshold_deg = 5
+    else:
+        landing_center_xy = None
+        landing_radius = None
+        orientation_success_threshold_deg = None
 
     # -------------------------------------------------------------------------
     # Output directory.
@@ -266,13 +443,30 @@ def main():
         "training_run": args_cli.load_run,
         "checkpoint": os.path.abspath(resume_path),
         "checkpoint_name": checkpoint_name,
-        "motion_file": os.path.abspath(args_cli.motion_file),
         "num_envs": env_cfg.scene.num_envs,
-        "num_episodes": int(args_cli.num_episodes),
+        "motion_file": str(motion_paths[0]) if args_cli.motion_file is not None else None,
+        "motion_dir": str(motion_dir) if args_cli.motion_dir is not None else None,
+        "motion_pattern": args_cli.motion_pattern if args_cli.motion_dir is not None else None,
+        "num_episodes": total_target_episodes,
+        "target_episodes_per_motion": target_episodes_per_motion,
         "seed": int(args_cli.seed),
         "deterministic": bool(args_cli.deterministic),
         "git_commit": get_git_commit(),
+        "high_deformation_threshold_mm": float(args_cli.high_deformation_threshold_mm),
+        "severe_deformation_peak_threshold_mm": severe_deformation_peak_threshold_mm,
+        "sustained_high_deformation_fraction": float(args_cli.sustained_high_deformation_fraction),
+        "extreme_local_deformation_threshold_mm": float(args_cli.extreme_local_deformation_threshold_mm),
+        "torque_utilization_threshold" : float(args_cli.torque_utilization_threshold),
     }
+
+    if landing_center_xy is not None:
+        eval_config.update({
+            "landing_center_xy": landing_center_xy,
+            "landing_radius_m": landing_radius,
+            "orientation_success_threshold_deg": orientation_success_threshold_deg,
+            "position_improvement_threshold_mm": float(args_cli.position_improvement_threshold_mm),
+            "orientation_improvement_threshold_deg": orientation_improvement_threshold_deg,
+        })
 
     # -------------------------------------------------------------------------
     # W&B evaluation run.
@@ -351,10 +545,30 @@ def main():
     obs = env.get_observations()
 
     action_cfg = env.unwrapped.cfg.actions.joint_pos
-    _, controlled_joint_names = env.unwrapped.scene["robot"].find_joints(
+    robot = env.unwrapped.scene["robot"]
+
+    controlled_joint_ids, controlled_joint_names = robot.find_joints(
         action_cfg.joint_names,
         preserve_order=action_cfg.preserve_order,
     )
+
+    controlled_joint_effort_limits_nm = (robot.data.joint_effort_limits.torch[0,controlled_joint_ids].detach().cpu())
+
+    joint_effort_limits_config = {
+        joint_name: float(limit)
+        for joint_name, limit in zip(
+            controlled_joint_names,
+            controlled_joint_effort_limits_nm.tolist(),
+        )
+    }
+
+    eval_config["joint_effort_limits_nm"] = joint_effort_limits_config
+
+    if wb_run is not None:
+        wb_run.config.update(
+            {"joint_effort_limits_nm": joint_effort_limits_config},
+            allow_val_change=True,
+        )
 
     episode_steps = torch.zeros(
         env.num_envs,
@@ -364,9 +578,10 @@ def main():
 
     records: list[dict] = []
     trajectory_records: list[dict] = []
+    accepted_episodes_per_motion = {name: 0 for name in target_episodes_per_motion}
 
     try:
-        while simulation_app.is_running() and len(records) < args_cli.num_episodes:
+        while simulation_app.is_running() and len(records) < total_target_episodes:
             with torch.inference_mode():
                 actions = policy(obs)
                 obs, _, dones, extras = env.step(actions)
@@ -392,7 +607,7 @@ def main():
 
 
                 for env_id_tensor in done_ids:
-                    if len(records) >= args_cli.num_episodes:
+                    if len(records) >= total_target_episodes:
                         break
 
                     env_id = int(env_id_tensor.item())
@@ -409,12 +624,19 @@ def main():
                     steps = int(episode_steps[env_id].item())
 
                     motion_id = int(terminal["motion_id"][env_id].item())
+                    motion_name = motion.motion_name(motion_id)
+
+                    if motion_name not in target_episodes_per_motion:
+                        raise RuntimeError(f"Unexpected motion in evaluation: {motion_name}")
+
+                    if accepted_episodes_per_motion[motion_name] >= target_episodes_per_motion[motion_name]:
+                        continue
 
                     record = {
                         "episode_id": len(records),
                         "env_id": env_id,
                         "motion_id": motion_id,
-                        "motion_name": motion.motion_name(motion_id),
+                        "motion_name": motion_name,
                         "seed": int(args_cli.seed),
                         "episode_steps": steps,
                         "duration_s": steps * float(env.unwrapped.step_dt),
@@ -424,11 +646,12 @@ def main():
                     }
 
                     records.append(record)
+                    accepted_episodes_per_motion[motion_name] += 1
 
                     print(
-                        f"[EVAL] episode={record['episode_id']} "
-                        f"env={env_id} steps={steps} "
-                        f"termination={termination}"
+                        f"[EVAL] episode={record['episode_id']} motion={motion_name} "
+                        f"count={accepted_episodes_per_motion[motion_name]}/{target_episodes_per_motion[motion_name]} "
+                        f"env={env_id} steps={steps} termination={termination}"
                     )
 
                     if not bool(terminal["terminal_valid"][env_id].item()):
@@ -450,12 +673,13 @@ def main():
 
                     cube_pos = terminal["cube_pos_e"][env_id].detach().cpu()
                     cube_quat = terminal["cube_quat_xyzw"][env_id].detach().cpu()
-                    reference_cube_pos = (
-                        terminal["reference_cube_pos_e"][env_id].detach().cpu()
-                    )
-                    reference_cube_quat = (
-                        terminal["reference_cube_quat_xyzw"][env_id].detach().cpu()
-                    )
+                    cube_pos_r0 = terminal["cube_pos_r0"][env_id].detach().cpu()
+                    cube_quat_r0 = terminal["cube_quat_r0_xyzw"][env_id].detach().cpu()
+                    final_reference_cube_pos_r0 = terminal["final_reference_cube_pos_r0"][env_id].detach().cpu()
+                    final_reference_cube_quat_r0 = terminal["final_reference_cube_quat_r0_xyzw"][env_id].detach().cpu()
+                    reference_cube_pos = terminal["reference_cube_pos_e"][env_id].detach().cpu()
+                    reference_cube_quat = terminal["reference_cube_quat_xyzw"][env_id].detach().cpu()
+                    
 
                     if terminal_steps != steps:
                         raise RuntimeError(
@@ -493,61 +717,21 @@ def main():
 
                     trajectory = terminal["trajectory"]
 
-                    motion_frames = (
-                        trajectory["motion_frame"][env_id, :terminal_steps]
-                        .detach()
-                        .cpu()
-                    )
-                    cube_position_delta_m = (
-                        trajectory["cube_position_delta_m"][env_id, :terminal_steps]
-                        .detach()
-                        .cpu()
-                    )
-                    body_position_error_m = (
-                        trajectory["body_position_error_m"][env_id, :terminal_steps]
-                        .detach()
-                        .cpu()
-                    )
-                    body_orientation_error_rad = (
-                        trajectory["body_orientation_error_rad"][
-                            env_id, :terminal_steps
-                        ]
-                        .detach()
-                        .cpu()
-                    )
-                    hand_position_error_m = (
-                        trajectory["hand_position_error_m"][env_id, :terminal_steps]
-                        .detach()
-                        .cpu()
-                    )
-                    cube_position_error_m = (
-                        trajectory["cube_position_error_m"][env_id, :terminal_steps]
-                        .detach()
-                        .cpu()
-                    )
-                    cube_xy_position_error_m = (
-                        trajectory["cube_xy_position_error_m"][
-                            env_id, :terminal_steps
-                        ]
-                        .detach()
-                        .cpu()
-                    )
-                    cube_orientation_error_rad = (
-                        trajectory["cube_orientation_error_rad"][
-                            env_id, :terminal_steps
-                        ]
-                        .detach()
-                        .cpu()
-                    )
-                    joint_torque_nm = (
-                        trajectory["joint_torque_nm"][env_id, :terminal_steps]
-                        .detach()
-                        .cpu()
-                    )
-                    action_delta = (
-                        trajectory["action_delta"][env_id, :terminal_steps]
-                        .detach()
-                        .cpu()
+                    motion_frames = trajectory["motion_frame"][env_id, :terminal_steps].detach().cpu()
+                    motion_phase = trajectory["phase"][env_id,:terminal_steps].detach().cpu()
+                    body_position_error_m = trajectory["body_position_error_m"][env_id, :terminal_steps].detach().cpu()
+                    body_orientation_error_rad = trajectory["body_orientation_error_rad"][env_id, :terminal_steps].detach().cpu()
+                    hand_position_error_m = trajectory["hand_position_error_m"][env_id, :terminal_steps].detach().cpu()
+                    cube_xy_position_error_m = trajectory["cube_xy_position_error_m"][env_id, :terminal_steps].detach().cpu()
+                    cube_orientation_error_rad = trajectory["cube_orientation_error_rad"][env_id, :terminal_steps].detach().cpu()
+                    joint_torque_nm = trajectory["joint_torque_nm"][env_id, :terminal_steps].detach().cpu()
+                    action_delta = (trajectory["action_delta"][env_id, :terminal_steps].detach().cpu())
+                    position_landing_start_phase_tensor = terminal["position_landing_start_phase"][env_id].detach().cpu()
+                    orientation_landing_start_phase_tensor = terminal["orientation_landing_start_phase"][env_id].detach().cpu()
+
+                    phase_tracking_available = (
+                        torch.isfinite(position_landing_start_phase_tensor).item()
+                        and torch.isfinite(orientation_landing_start_phase_tensor).item()
                     )
 
                     #---------------------------------------------
@@ -581,14 +765,30 @@ def main():
                     # ---------------------------------------------------------
                     # Cartesian trajectory metrics.
                     # ---------------------------------------------------------
+                    trajectory_metric_kwargs = {}
+
+                    if phase_tracking_available:
+                        position_landing_start_phase = float(position_landing_start_phase_tensor.item())
+                        orientation_landing_start_phase = float(orientation_landing_start_phase_tensor.item())
+                        robot_tracking_relaxation_start_phase = max(position_landing_start_phase, orientation_landing_start_phase)
+
+                        record["position_landing_start_phase"] = position_landing_start_phase
+                        record["orientation_landing_start_phase"] = orientation_landing_start_phase
+                        record["robot_tracking_relaxation_start_phase"] = robot_tracking_relaxation_start_phase
+
+                        trajectory_metric_kwargs = {
+                            "phase": motion_phase,
+                            "position_landing_start_phase": position_landing_start_phase,
+                            "orientation_landing_start_phase": orientation_landing_start_phase,
+                        }
 
                     trajectory_metrics = compute_cartesian_trajectory_metrics(
                         body_position_error_m=body_position_error_m,
                         body_orientation_error_rad=body_orientation_error_rad,
                         hand_position_error_m=hand_position_error_m,
-                        cube_position_error_m=cube_position_error_m,
                         cube_xy_position_error_m=cube_xy_position_error_m,
                         cube_orientation_error_rad=cube_orientation_error_rad,
+                        **trajectory_metric_kwargs,
                     )
 
                     record.update(
@@ -608,13 +808,45 @@ def main():
                         reference_quat=reference_cube_quat,
                         current_quat=cube_quat,
                     )
+                    record.update({key: float(value.item())for key, value in pose_metrics.items()})
 
-                    record.update(
-                        {
+                    if landing_center_xy is not None:
+                        record["final_cube_x_r0_m"] = float(cube_pos_r0[0].item())
+                        record["final_cube_y_r0_m"] = float(cube_pos_r0[1].item())
+                        record["reference_final_cube_x_r0_m"] = float(final_reference_cube_pos_r0[0].item())
+                        record["reference_final_cube_y_r0_m"] = float(final_reference_cube_pos_r0[1].item())
+
+                        landing_metrics = compute_terminal_cube_landing_metrics(
+                            reference_pos_r0=final_reference_cube_pos_r0,
+                            current_pos_r0=cube_pos_r0,
+                            reference_quat_r0=final_reference_cube_quat_r0,
+                            current_quat_r0=cube_quat_r0,
+                            landing_center_xy=landing_center_xy,
+                            landing_radius=landing_radius,
+                            position_improvement_threshold_m=position_improvement_threshold_m,
+                            orientation_improvement_threshold_deg=orientation_improvement_threshold_deg,
+                        )
+                        record.update({key: float(value.item()) for key, value in landing_metrics.items()})
+
+                        success_metrics = compute_terminal_task_success_metrics(
+                            reference_landing_xy_error_m=landing_metrics["reference_landing_xy_error_m"],
+                            final_landing_xy_error_m=landing_metrics["final_landing_xy_error_m"],
+                            reference_landing_orientation_error_deg=landing_metrics[
+                                "reference_landing_orientation_error_deg"
+                            ],
+                            final_landing_orientation_error_deg=landing_metrics[
+                                "final_landing_orientation_error_deg"
+                            ],
+                            final_top_face_correct=landing_metrics["final_top_face_correct"],
+                            motion_finished=torch.tensor(finished, dtype=torch.bool),
+                            orientation_threshold_deg=orientation_success_threshold_deg,
+                        )
+
+                        record.update({
                             key: float(value.item())
-                            for key, value in pose_metrics.items()
-                        }
-                    )
+                            for key, value in success_metrics.items()
+                        })
+
 
                     # ---------------------------------------------------------
                     # Control-quality metrics.
@@ -642,6 +874,7 @@ def main():
                         deformation_p95_m=deformation_p95_m,
                         deformation_max_m=deformation_max_m,
                         relative_extent_change=relative_extent_change,
+                        high_deformation_threshold_m = 0.001 * float(args_cli.high_deformation_threshold_mm),
                     )
 
                     record.update(
@@ -659,19 +892,10 @@ def main():
                         {
                             "episode_id": record["episode_id"],
                             "motion_frame": motion_frames.numpy().copy(),
-                            "body_position_error_m": body_position_error_m.numpy().copy(),
-                            "body_orientation_error_rad": body_orientation_error_rad.numpy().copy(),
-                            "hand_position_error_m": hand_position_error_m.numpy().copy(),
-                            "cube_position_delta_m": cube_position_delta_m.numpy().copy(),
-                            "cube_position_error_m": cube_position_error_m.numpy().copy(),
-                            "cube_xy_position_error_m": cube_xy_position_error_m.numpy().copy(),
-                            "cube_orientation_error_rad": cube_orientation_error_rad.numpy().copy(),
                             "joint_torque_nm": joint_torque_nm.numpy().copy(),
-                            "action_delta": action_delta.numpy().copy(),
                             "deformation_rms_m": deformation_rms_m.numpy().copy(),
                             "deformation_p95_m": deformation_p95_m.numpy().copy(),
                             "deformation_max_m": deformation_max_m.numpy().copy(),
-                            "relative_extent_change": relative_extent_change.numpy().copy(),
                         }
                     )
 
@@ -701,25 +925,19 @@ def main():
             "Mixed evaluation produced no nominal episodes."
         )
 
-    durations = [row["duration_s"] for row in records]
-    completed = sum(row["motion_finished"] for row in records)
+    nominal_durations = [row["duration_s"] for row in nominal_records]
+    nominal_completed = sum(row["motion_finished"] for row in nominal_records)
 
     summary = {
-        "num_episodes": len(records),
-        "motion_completion_rate": completed / len(records) if records else 0.0,
-        "mean_duration_s": statistics.mean(durations) if durations else 0.0,
-        "std_duration_s": (
-            statistics.pstdev(durations)
-            if len(durations) > 1
-            else 0.0
-        ),
+        "num_total_episodes": len(records),
+        "num_nominal_episodes": len(nominal_records),
+        "motion_completion_rate": nominal_completed / len(nominal_records),
+        "mean_duration_s": statistics.mean(nominal_durations),
+        "std_duration_s": statistics.pstdev(nominal_durations) if len(nominal_durations) > 1 else 0.0,
     }
 
-    summary.update(
-        compute_main_metric_summary(
-            nominal_records
-        )
-    )
+    summary.update(compute_main_metric_summary(nominal_records))
+    per_motion_summary = compute_per_motion_metric_summary(nominal_records)
 
     # -------------------------------------------------------------------------
     # Local outputs.
@@ -730,6 +948,7 @@ def main():
         config=eval_config,
         records=records,
         summary=summary,
+        per_motion_summary=per_motion_summary,
     )
 
     print(f"\n[INFO] Evaluation results: {output_dir}")
@@ -746,12 +965,16 @@ def main():
         records=nominal_records,
         trajectory_records=nominal_trajectory_records,
         joint_names=controlled_joint_names,
-    )
-
-    log_comparison_timeseries(
-        run=wb_run,
-        trajectory_records=nominal_trajectory_records,
-        joint_names=controlled_joint_names,
+        joint_effort_limits_nm=(controlled_joint_effort_limits_nm.numpy()),
+        torque_utilization_threshold=float(args_cli.torque_utilization_threshold),
+        per_motion_summary=per_motion_summary,
+        high_deformation_threshold_mm=float(args_cli.high_deformation_threshold_mm),
+        severe_deformation_peak_threshold_mm=severe_deformation_peak_threshold_mm,
+        sustained_high_deformation_fraction=float(args_cli.sustained_high_deformation_fraction),
+        extreme_local_deformation_threshold_mm=float(args_cli.extreme_local_deformation_threshold_mm),
+        landing_center_xy=landing_center_xy,
+        landing_radius=landing_radius,
+        orientation_success_threshold_deg=orientation_success_threshold_deg,
     )
 
     log_robustness_visualizations(

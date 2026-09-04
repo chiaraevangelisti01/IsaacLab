@@ -13,7 +13,7 @@ from isaaclab.managers import (
 from isaaclab.utils.configclass import configclass
 
 from ..utils.deformable_utils import compute_deformable_shape_metrics
-from ..utils.geometry_utils import orientation_error, vector_error, xy_position_error
+from ..utils.geometry_utils import orientation_error, orientation_in_frame, position_in_frame, vector_error, xy_position_error
 from ..utils.motion_utils import H1_HAND_REFERENCE_NAMES, H1_TRACKED_BODY_NAMES
 from .robustness import (
     initialize_robustness_terminal_buffers,
@@ -33,6 +33,9 @@ class SoftDiceEvaluationRecorder(RecorderTerm):
             action_cfg.joint_names,
             preserve_order=action_cfg.preserve_order,
         )
+
+        self._robot_pos_e = torch.as_tensor(self._motion.robot.cfg.init_state.pos, dtype=torch.float32, device=env.device).unsqueeze(0).expand(env.num_envs, -1)
+        self._robot_quat_e = torch.as_tensor(self._motion.robot.cfg.init_state.rot, dtype=torch.float32, device=env.device).unsqueeze(0).expand(env.num_envs, -1)       
 
         self._controlled_joint_ids = torch.as_tensor(
             joint_ids,
@@ -111,6 +114,18 @@ class SoftDiceEvaluationRecorder(RecorderTerm):
                 dtype=torch.long,
                 device=env.device,
             ),
+            "position_landing_start_phase": torch.full(
+                (env.num_envs,),
+                float("nan"),
+                dtype=torch.float32,
+                device=env.device,
+            ),
+            "orientation_landing_start_phase": torch.full(
+                (env.num_envs,),
+                float("nan"),
+                dtype=torch.float32,
+                device=env.device,
+            ),
             "trajectory": {
                 "motion_frame": torch.full(
                     (env.num_envs, self._max_episode_steps),
@@ -145,11 +160,6 @@ class SoftDiceEvaluationRecorder(RecorderTerm):
                     dtype=torch.float32,
                     device=env.device,
                 ),
-                "cube_position_error_m": torch.zeros(
-                    (env.num_envs, self._max_episode_steps),
-                    dtype=torch.float32,
-                    device=env.device,
-                ),
                 "cube_xy_position_error_m": torch.zeros(
                     (env.num_envs, self._max_episode_steps),
                     dtype=torch.float32,
@@ -157,11 +167,6 @@ class SoftDiceEvaluationRecorder(RecorderTerm):
                 ),
                 "cube_orientation_error_rad": torch.zeros(
                     (env.num_envs, self._max_episode_steps),
-                    dtype=torch.float32,
-                    device=env.device,
-                ),
-                "cube_position_delta_m": torch.zeros(
-                    (env.num_envs, self._max_episode_steps, 3),
                     dtype=torch.float32,
                     device=env.device,
                 ),
@@ -203,8 +208,18 @@ class SoftDiceEvaluationRecorder(RecorderTerm):
                     dtype=torch.float32,
                     device=env.device,
                 ),
+                "phase": torch.zeros(
+                    (env.num_envs,self._max_episode_steps),
+                    dtype=torch.float32,
+                    device=env.device,
+                ),
             },
+            "cube_pos_r0": torch.zeros(env.num_envs, 3, dtype=torch.float32, device=env.device),
+            "cube_quat_r0_xyzw": torch.zeros(env.num_envs, 4, dtype=torch.float32, device=env.device),
+            "final_reference_cube_pos_r0": torch.zeros(env.num_envs, 3, dtype=torch.float32, device=env.device),
+            "final_reference_cube_quat_r0_xyzw": torch.zeros(env.num_envs, 4, dtype=torch.float32, device=env.device),
         }
+        
         initialize_robustness_terminal_buffers(
             env,
             env.extras["evaluation"],
@@ -273,18 +288,6 @@ class SoftDiceEvaluationRecorder(RecorderTerm):
         # Cube trajectory tracking.
         # --------------------------------------------------------------
 
-        # Signed Cartesian displacement:
-        # positive means simulated cube is in the positive axis direction
-        # relative to the reference.
-        cube_position_delta = (
-            self._motion.simulator_cube_pos - self._motion.cube_pos
-        )
-
-        cube_position_error = vector_error(
-            reference=self._motion.cube_pos,
-            current=self._motion.simulator_cube_pos,
-        )
-
         cube_xy_position_error = xy_position_error(
             reference_pos=self._motion.cube_pos,
             current_pos=self._motion.simulator_cube_pos,
@@ -325,6 +328,7 @@ class SoftDiceEvaluationRecorder(RecorderTerm):
         # --------------------------------------------------------------
 
         trajectory["motion_frame"][self._env_ids, step_idx] = self._motion.frame_idx
+        trajectory["phase"][self._env_ids,step_idx,] = self._motion.phase
 
         trajectory["body_position_error_m"][
             self._env_ids, step_idx, :
@@ -337,14 +341,6 @@ class SoftDiceEvaluationRecorder(RecorderTerm):
         trajectory["hand_position_error_m"][
             self._env_ids, step_idx, :
         ] = hand_position_error
-
-        trajectory["cube_position_delta_m"][
-            self._env_ids, step_idx, :
-        ] = cube_position_delta
-
-        trajectory["cube_position_error_m"][
-            self._env_ids, step_idx
-        ] = cube_position_error
 
         trajectory["cube_xy_position_error_m"][
             self._env_ids, step_idx
@@ -413,6 +409,15 @@ class SoftDiceEvaluationRecorder(RecorderTerm):
         reference_cube_pos = self._motion.cube_pos
         reference_cube_quat = self._motion.cube_quat
 
+        final_reference_cube_pos = self._motion.final_cube_pos
+        final_reference_cube_quat = self._motion.final_cube_quat
+
+        cube_pos_r0 = position_in_frame(position=cube_pos, frame_position=self._robot_pos_e, frame_orientation=self._robot_quat_e)
+        cube_quat_r0 = orientation_in_frame(orientation=cube_quat, frame_orientation=self._robot_quat_e)
+
+        final_reference_cube_pos_r0 = position_in_frame(position=final_reference_cube_pos, frame_position=self._robot_pos_e, frame_orientation=self._robot_quat_e)
+        final_reference_cube_quat_r0 = orientation_in_frame(orientation=final_reference_cube_quat, frame_orientation=self._robot_quat_e)
+
         output["terminal_valid"][env_ids_t] = True
         output["episode_steps"][env_ids_t] = self._env.episode_length_buf[env_ids_t]
         output["motion_frame"][env_ids_t] = self._motion.frame_idx[env_ids_t]
@@ -422,6 +427,10 @@ class SoftDiceEvaluationRecorder(RecorderTerm):
 
         output["reference_cube_pos_e"][env_ids_t] = reference_cube_pos[env_ids_t]
         output["reference_cube_quat_xyzw"][env_ids_t] = reference_cube_quat[env_ids_t]
+        output["cube_pos_r0"][env_ids_t] = cube_pos_r0[env_ids_t]
+        output["cube_quat_r0_xyzw"][env_ids_t] = cube_quat_r0[env_ids_t]
+        output["final_reference_cube_pos_r0"][env_ids_t] = final_reference_cube_pos_r0[env_ids_t]
+        output["final_reference_cube_quat_r0_xyzw"][env_ids_t] = final_reference_cube_quat_r0[env_ids_t]
 
         termination_manager = self._env.termination_manager
 
@@ -433,6 +442,10 @@ class SoftDiceEvaluationRecorder(RecorderTerm):
             "time_out"
         )[env_ids_t]
         output["motion_id"][env_ids_t] = self._motion.motion_id[env_ids_t]
+
+        if self._motion.cfg.phase_metadata_file:
+            output["position_landing_start_phase"][env_ids_t] = self._motion.position_landing_start_phase[env_ids_t]
+            output["orientation_landing_start_phase"][env_ids_t] = self._motion.orientation_landing_start_phase[env_ids_t]
 
         snapshot_robustness_terminal(
             env=self._env,

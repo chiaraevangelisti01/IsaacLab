@@ -258,7 +258,7 @@ def reset_to_motion_start(
     cube.write_nodal_kinematic_target_to_sim_index(nodal_targets, env_ids=env_ids)
     cube.reset(env_ids)
 
-    motion._cached_cube_quat_step = -1
+    motion._cached_cube_transform_step = -1
 
 def randomize_joint_default_pos(
     env: ManagerBasedRLEnv,

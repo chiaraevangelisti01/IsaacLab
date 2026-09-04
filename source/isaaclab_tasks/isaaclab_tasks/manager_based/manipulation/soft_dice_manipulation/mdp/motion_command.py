@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 from pathlib import Path
@@ -13,7 +12,9 @@ from isaaclab.utils.configclass import configclass
 from isaaclab.utils.math import (
     quat_apply,
     quat_inv,
+    quat_from_matrix,
     quat_mul,
+    quat_unique,
     yaw_quat,
 )
 
@@ -34,7 +35,7 @@ from ..utils.motion_utils import (
 
 )
 
-from ..utils.deformable_utils import estimate_deformable_orientation_kabsch
+from ..utils.deformable_utils import  estimate_deformable_rigid_transform_kabsch
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
@@ -176,8 +177,9 @@ class MotionCommand(CommandTerm):
             device=self.device,
         )
 
+        self._cached_cube_rotation = None
         self._cached_cube_quat = None
-        self._cached_cube_quat_step = -1
+        self._cached_cube_transform_step = -1
 
         # -------------------------------------------------------------------------
         # Episode tracking metrics
@@ -598,6 +600,28 @@ class MotionCommand(CommandTerm):
             )
         )
 
+    def _update_cube_rigid_transform(self):
+        step = self._env.common_step_counter
+
+        if self._cached_cube_transform_step != step:
+            reference_nodal_pos = (
+                self.cube.data.default_nodal_state_w.torch[..., :3]
+            )
+            current_nodal_pos = (
+                self.cube.data.nodal_pos_w.torch
+            )
+
+            rotation, _ = estimate_deformable_rigid_transform_kabsch(
+                reference_nodal_pos,
+                current_nodal_pos,
+            )
+
+            self._cached_cube_rotation = rotation
+            self._cached_cube_quat = quat_unique(
+                quat_from_matrix(rotation)
+            )
+            self._cached_cube_transform_step = step
+
     @property
     def command(self) -> torch.Tensor:
         return torch.cat((self.joint_pos, self.joint_vel), dim=-1)
@@ -635,24 +659,16 @@ class MotionCommand(CommandTerm):
         return self._cube_quat_all[self._global_frame_idx()]
 
     @property
-    def final_cube_quat(
-        self,
-    ) -> torch.Tensor:
+    def final_cube_pos(self) -> torch.Tensor:
+        """Final demonstrated cube position for each active motion."""
+        final_global_idx = self._motion_offsets[self._motion_id] + self._motion_lengths[self._motion_id] - 1
+        return self._cube_pos_all[final_global_idx]
+
+    @property
+    def final_cube_quat(self) -> torch.Tensor:
         """Final demonstrated cube orientation for each active motion."""
-
-        final_global_idx = (
-            self._motion_offsets[
-                self._motion_id
-            ]
-            + self._motion_lengths[
-                self._motion_id
-            ]
-            - 1
-        )
-
-        return self._cube_quat_all[
-            final_global_idx
-        ]
+        final_global_idx = self._motion_offsets[self._motion_id] + self._motion_lengths[self._motion_id] - 1
+        return self._cube_quat_all[final_global_idx]
 
     @property
     def body_pos(self) -> torch.Tensor:
@@ -691,23 +707,13 @@ class MotionCommand(CommandTerm):
 
 
     @property
-    def simulator_cube_quat(self) -> torch.Tensor:
-        """Current bulk orientation of the deformable dice."""
+    def simulator_cube_rotation(self):
+        self._update_cube_rigid_transform()
+        return self._cached_cube_rotation
 
-        step = self._env.common_step_counter
-
-        if self._cached_cube_quat_step != step:
-            reference_nodal_pos = (
-                self.cube.data.default_nodal_state_w.torch[..., :3]
-            )
-            current_nodal_pos = self.cube.data.nodal_pos_w.torch
-
-            self._cached_cube_quat = estimate_deformable_orientation_kabsch(
-                reference_nodal_pos=reference_nodal_pos,
-                current_nodal_pos=current_nodal_pos,
-            )
-            self._cached_cube_quat_step = step
-
+    @property
+    def simulator_cube_quat(self):
+        self._update_cube_rigid_transform()
         return self._cached_cube_quat
 
     @property
@@ -898,8 +904,11 @@ class MotionCommand(CommandTerm):
         motion_ids = self._motion_id[env_ids]
         return self._motion_offsets[motion_ids] + self._start_frames[motion_ids]
 
-    def sample_motions(self, env_ids: torch.Tensor) -> None:
-        """Assign one reference trajectory per environment for the next episode."""
+    def sample_motions(
+        self,
+        env_ids: torch.Tensor,
+    ) -> None:
+        """Assign one reference trajectory per environment."""
 
         if env_ids.numel() == 0:
             return
@@ -910,7 +919,8 @@ class MotionCommand(CommandTerm):
                 dtype=torch.long,
                 device=self.device,
             )
-        else:
+
+        elif self.cfg.motion_sampling == "random":
             motion_ids = torch.randint(
                 low=0,
                 high=self.num_motions,
@@ -918,9 +928,28 @@ class MotionCommand(CommandTerm):
                 device=self.device,
             )
 
+        elif self.cfg.motion_sampling == "balanced":
+            start = torch.remainder(self._motion_episode_count.sum(), self.num_motions)
+            motion_ids = torch.remainder(
+                torch.arange(env_ids.numel(), dtype=torch.long, device=self.device) + start,
+                self.num_motions,
+            )
+
+        else:
+            raise ValueError(
+                "Unknown motion_sampling mode: "
+                f"{self.cfg.motion_sampling!r}. "
+                "Expected 'random' or 'balanced'."
+            )
+
         self._motion_id[env_ids] = motion_ids
-        self._frame_idx[env_ids] = self._start_frames[motion_ids]
+
+        self._frame_idx[env_ids] = (
+            self._start_frames[motion_ids]
+        )
+
         self._motion_step[env_ids] = 0
+
         self._motion_episode_count += torch.bincount(
             motion_ids,
             minlength=self.num_motions,
@@ -1133,6 +1162,7 @@ class MotionCommandCfg(CommandTermCfg):
     motion_file: str = ""
     motion_dir: str = ""
     motion_pattern: str = "*.npz"
+    motion_sampling: str = "random"
 
     phase_metadata_file: str = ""
 

@@ -8,6 +8,7 @@ def compute_deformation_metrics(
     deformation_p95_m: torch.Tensor,
     deformation_max_m: torch.Tensor,
     relative_extent_change: torch.Tensor,
+    high_deformation_threshold_m: float,
 ) -> dict[str, torch.Tensor]:
     """Compute episode-level deformable-object shape metrics."""
 
@@ -22,6 +23,7 @@ def compute_deformation_metrics(
         "deformation_p95_mean_m": torch.mean(deformation_p95_m),
         "deformation_p95_peak_m": torch.max(deformation_p95_m),
         "deformation_max_peak_m": torch.max(deformation_max_m),
+        "deformation_high_fraction": torch.mean((deformation_rms_m > high_deformation_threshold_m).to(torch.float32)),
     }
 
     axis_names = ("x", "y", "z")
