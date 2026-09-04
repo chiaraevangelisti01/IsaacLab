@@ -213,6 +213,14 @@ class LandingAwareRewardsCfg(
         },
     )
 
+    object_deformation = RewTerm(
+        func=mdp.object_deformation_rms,
+        weight=-5.0,
+        params={
+            "command_name": "motion",
+        },
+    )
+
 
 # ======================================================================
 # Environment

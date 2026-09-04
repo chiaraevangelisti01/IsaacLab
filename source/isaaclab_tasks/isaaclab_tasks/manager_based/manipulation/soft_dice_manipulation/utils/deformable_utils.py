@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import torch
-import numpy as np
 
 from isaaclab.utils.math import quat_from_matrix, quat_unique
 
@@ -26,34 +25,44 @@ def _validate_nodal_positions(
 def estimate_deformable_rigid_transform_kabsch(
     reference_nodal_pos: torch.Tensor,
     current_nodal_pos: torch.Tensor,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """Estimate the best-fit rigid transform from reference to current nodes.
+    return_singular_values: bool = False,
+):
+    """Estimate the best-fit rigid transform from reference to current nodes."""
 
-    The transform follows:
+    _validate_nodal_positions(
+        reference_nodal_pos,
+        current_nodal_pos,
+    )
 
-        y = R x + t
+    reference_center = reference_nodal_pos.mean(
+        dim=-2
+    )
+    current_center = current_nodal_pos.mean(
+        dim=-2
+    )
 
-    or, for row-wise nodal tensors:
+    reference_centered = (
+        reference_nodal_pos
+        - reference_center.unsqueeze(-2)
+    )
 
-        Y = X @ R.T + t
+    current_centered = (
+        current_nodal_pos
+        - current_center.unsqueeze(-2)
+    )
 
-    Returns:
-        rotation: Rotation matrix with shape (..., 3, 3).
-        translation: Translation with shape (..., 3).
-    """
+    covariance = (
+        reference_centered.transpose(-1, -2)
+        @ current_centered
+    )
 
-    _validate_nodal_positions(reference_nodal_pos, current_nodal_pos)
+    covariance_svd = covariance.to(
+        torch.float64
+    )
 
-    reference_center = reference_nodal_pos.mean(dim=-2)
-    current_center = current_nodal_pos.mean(dim=-2)
-
-    reference_centered = reference_nodal_pos - reference_center.unsqueeze(-2)
-    current_centered = current_nodal_pos - current_center.unsqueeze(-2)
-
-    covariance = reference_centered.transpose(-1, -2) @ current_centered
-    covariance_svd = covariance.to(torch.float64)
-
-    u, _, vh = torch.linalg.svd(covariance_svd)
+    u, singular_values, vh = torch.linalg.svd(
+        covariance_svd
+    )
 
     v = vh.transpose(-1, -2)
     u_t = u.transpose(-1, -2)
@@ -63,18 +72,34 @@ def estimate_deformable_rigid_transform_kabsch(
         dtype=covariance_svd.dtype,
         device=covariance_svd.device,
     )
+
     correction[..., -1] = torch.where(
         torch.det(v @ u_t) < 0.0,
         -1.0,
         1.0,
     )
 
-    rotation = v @ torch.diag_embed(correction) @ u_t
-    rotation = rotation.to(reference_nodal_pos.dtype)
+    rotation = (
+        v
+        @ torch.diag_embed(correction)
+        @ u_t
+    )
+
+    rotation = rotation.to(
+        reference_nodal_pos.dtype
+    )
 
     translation = current_center - (
-        rotation @ reference_center.unsqueeze(-1)
+        rotation
+        @ reference_center.unsqueeze(-1)
     ).squeeze(-1)
+
+    if return_singular_values:
+        return (
+            rotation,
+            translation,
+            singular_values,
+        )
 
     return rotation, translation
 
@@ -82,16 +107,37 @@ def estimate_deformable_rigid_transform_kabsch(
 def estimate_deformable_orientation_kabsch(
     reference_nodal_pos: torch.Tensor,
     current_nodal_pos: torch.Tensor,
-) -> torch.Tensor:
+    return_diagnostics: bool = False,
+):
     """Estimate the bulk rigid orientation of a deformable object."""
 
-    rotation, _ = estimate_deformable_rigid_transform_kabsch(
-        reference_nodal_pos,
-        current_nodal_pos,
+    if return_diagnostics:
+        (
+            rotation,
+            _,
+            singular_values,
+            ) = estimate_deformable_rigid_transform_kabsch(
+            reference_nodal_pos,
+            current_nodal_pos,
+            return_singular_values=True,
+        )
+
+        quat = quat_unique(
+            quat_from_matrix(rotation)
+        )
+
+        return quat, singular_values
+
+    rotation, _ = (
+        estimate_deformable_rigid_transform_kabsch(
+            reference_nodal_pos,
+            current_nodal_pos,
+        )
     )
 
-    return quat_unique(quat_from_matrix(rotation))
-
+    return quat_unique(
+        quat_from_matrix(rotation)
+    )
 
 def compute_deformable_shape_metrics(
     reference_nodal_pos: torch.Tensor,
@@ -176,46 +222,64 @@ def compute_deformable_shape_metrics(
         "relative_extent_change": relative_extent_change,
     }
 
-def _compute_rest_deformation_reference(
-    trajectory_records: list[dict],
-    start_frame: int = 100,
-    end_frame: int = 200,
-):
-    rms_values = []
-    p95_values = []
-    extent_values = []
+def compute_deformation_rms(
+    reference_nodal_pos: torch.Tensor,
+    current_nodal_pos: torch.Tensor,
+    rotation: torch.Tensor,
+) -> torch.Tensor:
+    """Compute RMS non-rigid deformation using a precomputed rigid rotation.
 
-    for episode in trajectory_records:
-        frames = np.asarray(episode["motion_frame"])
+    Args:
+        reference_nodal_pos:
+            Undeformed nodal positions, shape (..., N, 3).
 
-        mask = (
-            (frames >= start_frame)
-            & (frames <= end_frame)
+        current_nodal_pos:
+            Current nodal positions, shape (..., N, 3).
+
+        rotation:
+            Best-fit Kabsch rotation from reference to current,
+            shape (..., 3, 3).
+
+    Returns:
+        RMS nodal deformation, shape (...).
+    """
+
+    # Remove translation from both clouds.
+    reference_centered = (
+        reference_nodal_pos
+        - reference_nodal_pos.mean(dim=-2, keepdim=True)
+    )
+
+    current_centered = (
+        current_nodal_pos
+        - current_nodal_pos.mean(dim=-2, keepdim=True)
+    )
+
+    # Where the undeformed cloud would be if it had undergone
+    # only the best-fit rigid rotation.
+    rigid_prediction_centered = (
+        reference_centered
+        @ rotation.transpose(-1, -2)
+    )
+
+    # Anything left is non-rigid deformation.
+    nodal_residual = (
+        current_centered
+        - rigid_prediction_centered
+    )
+
+    # Euclidean deformation of every node.
+    nodal_deformation_m = torch.linalg.norm(
+        nodal_residual,
+        dim=-1,
+    )
+
+    # RMS across all nodes.
+    deformation_rms_m = torch.sqrt(
+        torch.mean(
+            nodal_deformation_m.square(),
+            dim=-1,
         )
+    )
 
-        if not np.any(mask):
-            continue
-
-        rms_values.append(
-            np.asarray(episode["deformation_rms_m"])[mask]
-        )
-        p95_values.append(
-            np.asarray(episode["deformation_p95_m"])[mask]
-        )
-        extent_values.append(
-            np.asarray(episode["relative_extent_change"])[mask]
-        )
-
-    if not rms_values:
-        raise ValueError(
-            "No trajectory samples available for resting deformation reference."
-        )
-
-    return {
-        "rms_m": np.mean(np.concatenate(rms_values)),
-        "p95_m": np.mean(np.concatenate(p95_values)),
-        "extent_change": np.mean(
-            np.concatenate(extent_values, axis=0),
-            axis=0,
-        ),
-    }
+    return deformation_rms_m

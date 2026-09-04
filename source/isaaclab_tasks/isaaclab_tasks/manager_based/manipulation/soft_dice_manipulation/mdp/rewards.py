@@ -24,6 +24,9 @@ from ..utils.motion_utils import (
 )
 
 from .observations import object_pos_r0
+from ..utils.deformable_utils import (
+    compute_deformation_rms,
+)
 
 if TYPE_CHECKING:
     from isaaclab.assets import Articulation
@@ -361,6 +364,7 @@ def motion_phase_weighted_body_angular_velocity_error_exp(
     )
 
     return scale * reward
+
 def object_phase_weighted_ref_position_error_exp(
     env: ManagerBasedRLEnv,
     command_name: str,
@@ -611,4 +615,26 @@ def landing_orientation_reward_exp(
     return (
         alpha
         * orientation_reward
+    )
+
+def object_deformation_rms(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+) -> torch.Tensor:
+
+    motion: MotionCommand = (
+        env.command_manager.get_term(command_name)
+    )
+
+    reference_nodal_pos = (
+        motion.cube.data.default_nodal_state_w.torch[..., :3]
+    )
+    current_nodal_pos = (
+        motion.cube.data.nodal_pos_w.torch
+    )
+
+    return compute_deformation_rms(
+        reference_nodal_pos=reference_nodal_pos,
+        current_nodal_pos=current_nodal_pos,
+        rotation=motion.simulator_cube_rotation,
     )
