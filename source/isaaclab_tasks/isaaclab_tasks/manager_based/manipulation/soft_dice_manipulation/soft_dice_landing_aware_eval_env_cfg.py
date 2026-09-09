@@ -145,13 +145,11 @@ class SoftDiceLandingAwareEvalEnvCfg(
             # ----------------------------------------------------------
             # Nominal material parameters.
             # ----------------------------------------------------------
-            "nominal_youngs_modulus_pa": float(
-                cube_material.youngs_modulus
-            ),
+            "nominal_youngs_modulus_pa": float(cube_material.youngs_modulus),
+            "nominal_poissons_ratio": float(cube_material.poissons_ratio),
+            "nominal_dynamic_friction": float(cube_material.dynamic_friction),
 
-            "nominal_poissons_ratio": float(
-                cube_material.poissons_ratio
-            ),
+            "dynamic_friction_values": (0.70, 0.85, 1.00, 1.15, 1.30),
         }
 
         # --------------------------------------------------------------

@@ -57,6 +57,7 @@ def set_deformable_material_values(
     asset_name: str,
     youngs_modulus: torch.Tensor | None = None,
     poissons_ratio: torch.Tensor | None = None,
+    dynamic_friction: torch.Tensor | None = None,
 ):
     """Set explicit deformable material values for selected environments."""
 
@@ -121,16 +122,10 @@ def set_deformable_material_values(
         current = (
             material_view
             .get_youngs_modulus()
-            .numpy()
-            .copy()
-            .astype(np.float32)
+            .numpy().copy().astype(np.float32)
         )
 
-        current[ids_np, 0] = (
-            values.detach()
-            .cpu()
-            .numpy()
-        )
+        current[ids_np, 0] = values.detach().cpu().numpy()
 
         material_view.set_youngs_modulus(
             wp.from_numpy(
@@ -141,9 +136,7 @@ def set_deformable_material_values(
             ids_wp,
         )
 
-        randomization["youngs_modulus_pa"][
-            env_ids
-        ] = values
+        randomization["youngs_modulus_pa"][env_ids] = values
 
     if poissons_ratio is not None:
         values = torch.as_tensor(
@@ -158,10 +151,7 @@ def set_deformable_material_values(
                 "match env_ids."
             )
 
-        if torch.any(
-            (values < 0.0)
-            | (values >= 0.5)
-        ):
+        if torch.any((values < 0.0)| (values >= 0.5)):
             raise ValueError(
                 "Poisson's ratio must satisfy "
                 "0 <= nu < 0.5."
@@ -170,16 +160,10 @@ def set_deformable_material_values(
         current = (
             material_view
             .get_poissons_ratio()
-            .numpy()
-            .copy()
-            .astype(np.float32)
+            .numpy().copy().astype(np.float32)
         )
 
-        current[ids_np, 0] = (
-            values.detach()
-            .cpu()
-            .numpy()
-        )
+        current[ids_np, 0] = (values.detach().cpu().numpy())
 
         material_view.set_poissons_ratio(
             wp.from_numpy(
@@ -193,3 +177,21 @@ def set_deformable_material_values(
         randomization["poissons_ratio"][
             env_ids
         ] = values
+
+        if dynamic_friction is not None:
+            values = torch.as_tensor(dynamic_friction, dtype=torch.float32, device=env.device).reshape(-1)
+
+            if values.shape[0] != env_ids.numel():
+                raise ValueError("Dynamic-friction value count does not match env_ids.")
+            if torch.any(values < 0.0):
+                raise ValueError("Dynamic friction must be non-negative.")
+
+            current = material_view.get_dynamic_friction().numpy().copy().astype(np.float32)
+            current[ids_np, 0] = values.detach().cpu().numpy()
+
+            material_view.set_dynamic_friction(
+                wp.from_numpy(current, dtype=wp.float32, device="cpu"),
+                ids_wp,
+            )
+
+            randomization["cube_dynamic_friction"][env_ids] = values

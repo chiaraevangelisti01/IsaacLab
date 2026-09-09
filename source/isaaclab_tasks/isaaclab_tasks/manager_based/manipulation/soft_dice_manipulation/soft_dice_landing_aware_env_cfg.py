@@ -136,7 +136,7 @@ class LandingAwareRewardsCfg(
 
     landing_position = RewTerm(
         func=mdp.landing_position_region_reward_exp,
-        weight=1.0,
+        weight=4.0,
         params={
             "command_name": "motion",
 

@@ -1104,15 +1104,44 @@ def _make_extreme_deformation_episode_table(
         data=extreme_episodes,
     )
 
+
 #-----------------------------------------------------------------------------
 # Landing aware task
 #-----------------------------------------------------------------------------
+_LANDING_CATEGORY_COLORS = {
+    "Better": "tab:green",
+    "Improved": "tab:green",
+    "Failure→success": "tab:blue",
+    "Kept success": "tab:green",
+    "Same": "0.65",
+    "Mixed": "tab:orange",
+    "Worse": "tab:red",
+    "Success→failure": "tab:red",
+    "Kept failure": "0.65",
+}
+
 def _plot_landing_xy_scatter(
     records: list[dict],
     landing_center_xy: tuple[float, float],
     landing_radius: float,
 ):
     records_by_motion = group_records_by_motion(records)
+    motion_names = list(records_by_motion.keys())
+
+    def base_motion_name(name: str) -> str:
+        return name.replace("_symmetric", "")
+
+    base_motion_names = []
+    for name in motion_names:
+        base = base_motion_name(name)
+        if base not in base_motion_names:
+            base_motion_names.append(base)
+
+    cmap = plt.get_cmap("tab10" if len(base_motion_names) <= 10 else "tab20")
+    motion_colors = {
+        name: cmap(i)
+        for i, name in enumerate(base_motion_names)
+    }
 
     center_x_cm = 100.0 * landing_center_xy[0]
     center_y_cm = 100.0 * landing_center_xy[1]
@@ -1127,8 +1156,11 @@ def _plot_landing_xy_scatter(
         x_cm = 100.0 * np.asarray([r["final_cube_x_r0_m"] for r in motion_records])
         y_cm = 100.0 * np.asarray([r["final_cube_y_r0_m"] for r in motion_records])
 
-        scatter = ax.scatter(x_cm, y_cm, label=motion_name)
-        color = scatter.get_facecolor()[0]
+        base_name = base_motion_name(motion_name)
+        color = motion_colors[base_name]
+        marker = "s" if "_symmetric" in motion_name else "o"
+
+        ax.scatter(x_cm,y_cm,label=motion_name,color=color,marker=marker,alpha=0.65)
 
         reference_x_cm = 100.0 * motion_records[0]["reference_final_cube_x_r0_m"]
         reference_y_cm = 100.0 * motion_records[0]["reference_final_cube_y_r0_m"]
@@ -1196,9 +1228,14 @@ def _plot_landing_improvement_overview(records: list[dict]):
             ax.axis("off")
             continue
 
+        present = counts > 0
+        shown_counts = counts[present]
+        shown_categories = [c for c, keep in zip(categories, present) if keep]
+
         ax.pie(
-            counts,
-            labels=categories,
+            shown_counts,
+            labels=shown_categories,
+            colors=[_LANDING_CATEGORY_COLORS[c] for c in shown_categories],
             autopct=lambda pct: f"{pct:.1f}%",
             startangle=90,
         )
@@ -1246,7 +1283,13 @@ def _plot_landing_improvement_by_motion(records: list[dict]):
     left = np.zeros(len(motion_names), dtype=np.float64)
     for idx, category in enumerate(position_categories):
         values = position_pct[:, idx]
-        axes[0].barh(y, values, left=left, label=category)
+        axes[0].barh(
+            y,
+            values,
+            left=left,
+            label=category,
+            color=_LANDING_CATEGORY_COLORS[category],
+        )
         left += values
     axes[0].set_yticks(y, labels=motion_names)
     axes[0].invert_yaxis()
@@ -1257,7 +1300,13 @@ def _plot_landing_improvement_by_motion(records: list[dict]):
     left = np.zeros(len(motion_names), dtype=np.float64)
     for idx, category in enumerate(orientation_categories):
         values = orientation_pct[:, idx]
-        axes[1].barh(y, values, left=left, label=category)
+        axes[1].barh(
+            y,
+            values,
+            left=left,
+            label=category,
+            color=_LANDING_CATEGORY_COLORS[category],
+        )
         left += values
     axes[1].set_xlim(0.0, 100.0)
     axes[1].set_xlabel("Episodes [%]")
@@ -1266,8 +1315,14 @@ def _plot_landing_improvement_by_motion(records: list[dict]):
     left = np.zeros(len(motion_names), dtype=np.float64)
     for idx, category in enumerate(combined_categories):
         values = combined_pct[:, idx]
-        axes[2].barh(y, values, left=left, label=category)
-        left += values
+        axes[2].barh(
+            y,
+            values,
+            left=left,
+            label=category,
+            color=_LANDING_CATEGORY_COLORS[category],
+        )
+    left += values
     axes[2].set_xlim(0.0, 100.0)
     axes[2].set_xlabel("Episodes [%]")
     axes[2].set_title("Combined improvement")
@@ -1351,6 +1406,120 @@ def _plot_landing_improvement_magnitude_by_motion(records: list[dict]):
 
     fig.tight_layout()
     return fig
+
+def _shadow_violation_category(mask: int) -> str:
+    if mask == 0:
+        return "No violation"
+    if mask == 1:
+        return "Object position"
+    if mask == 2:
+        return "Object orientation"
+    if mask == 4:
+        return "Hand Z"
+    return "Multiple"
+
+
+def _plot_shadow_terminations_by_motion(records: list[dict]):
+    records_by_motion = group_records_by_motion(records)
+    motion_names = list(records_by_motion.keys())
+
+    categories = [
+        "No violation",
+        "Object position",
+        "Object orientation",
+        "Hand Z",
+        "Multiple",
+    ]
+
+    colors = {
+        "No violation": "tab:green",
+        "Object position": "tab:blue",
+        "Object orientation": "tab:orange",
+        "Hand Z": "tab:red",
+        "Multiple": "tab:purple",
+    }
+
+    ncols = 4
+    nrows = int(np.ceil(len(motion_names) / ncols))
+    fig, axes = plt.subplots(nrows, ncols, figsize=(16, 4 * nrows))
+    axes = np.asarray(axes).reshape(-1)
+
+    for ax, motion_name in zip(axes, motion_names):
+        motion_records = records_by_motion[motion_name]
+        labels = [
+            _shadow_violation_category(int(r["shadow_first_violation_mask"]))
+            for r in motion_records
+        ]
+        counts = _count_categories(labels, categories)
+
+        present = counts > 0
+        present_counts = counts[present]
+        present_categories = [c for c, keep in zip(categories, present) if keep]
+        present_colors = [colors[c] for c in present_categories]
+
+        ax.pie(
+            present_counts,
+            labels=present_categories,
+            colors=present_colors,
+            autopct=lambda pct: f"{pct:.0f}%",
+            startangle=90,
+        )
+        ax.set_title(motion_name)
+
+    for ax in axes[len(motion_names):]:
+        ax.axis("off")
+
+    fig.suptitle("First would-be tracking termination by trajectory")
+    fig.tight_layout()
+    return fig
+
+def _plot_shadow_violation_phase_by_motion(records: list[dict]):
+    records_by_motion = group_records_by_motion(records)
+
+    motion_names = []
+    phase_values = []
+
+    for motion_name, motion_records in records_by_motion.items():
+        values = np.asarray([
+            r["shadow_first_violation_phase"]
+            for r in motion_records
+            if r["shadow_would_terminate"]
+        ], dtype=np.float64)
+
+        values = values[np.isfinite(values)]
+
+        if len(values) > 0:
+            motion_names.append(motion_name)
+            phase_values.append(values)
+
+    if not phase_values:
+        return None
+
+    fig, ax = plt.subplots(
+        figsize=(10, max(5, 0.55 * len(motion_names)))
+    )
+
+    y = np.arange(1, len(motion_names) + 1)
+
+    ax.boxplot(
+        phase_values,
+        vert=False,
+        positions=y,
+        widths=0.5,
+    )
+
+    for y_pos, values in zip(y, phase_values):
+        ax.scatter(values, np.full(len(values), y_pos), alpha=0.45)
+
+    ax.set_yticks(y, labels=motion_names)
+    ax.invert_yaxis()
+    ax.set_xlim(0.0, 1.0)
+    ax.set_xlabel("Motion phase")
+    ax.set_title("Phase of first would-be tracking termination")
+
+    fig.tight_layout()
+    return fig
+
 # -----------------------------------------------------------------------------
 # Public W&B logging entry point.
 # -----------------------------------------------------------------------------
@@ -1403,6 +1572,14 @@ def log_evaluation_visualizations(
     )
     deformation_overview_fig = _plot_deformation_overview(records,high_deformation_threshold_mm=high_deformation_threshold_mm)
     deformation_by_motion_fig = _plot_deformation_by_motion(records)
+
+    shadow_termination_fig = None
+    shadow_phase_fig = None
+
+    if "shadow_first_violation_mask" in records[0]:
+        shadow_termination_fig = _plot_shadow_terminations_by_motion(records)
+        shadow_phase_fig = _plot_shadow_violation_phase_by_motion(records)
+
     extreme_deformation_table = _make_extreme_deformation_episode_table(
         records=records,
         trajectory_records=trajectory_records,
@@ -1466,6 +1643,17 @@ def log_evaluation_visualizations(
         log_data["evaluation_cube/final_xy_reference_error"] = wandb.Image(final_xy_fig)
         log_data["evaluation_cube/final_pose_components"] = wandb.Image(final_pose_fig)
 
+    #Shadow termination plot
+    if shadow_termination_fig is not None:
+        log_data["evaluation_termination/first_violation_by_motion"] = (
+            wandb.Image(shadow_termination_fig)
+        )
+
+    if shadow_phase_fig is not None:
+        log_data["evaluation_termination/first_violation_phase"] = (
+            wandb.Image(shadow_phase_fig)
+        )
+
     run.log(log_data)
 
     figures = [
@@ -1488,6 +1676,12 @@ def log_evaluation_visualizations(
         figures.append(landing_improvement_magnitude_fig)
     else:
         figures.append(final_pose_fig)
+
+    if shadow_termination_fig is not None:
+        figures.append(shadow_termination_fig)
+
+    if shadow_phase_fig is not None:
+        figures.append(shadow_phase_fig)
 
     for fig in figures:
         plt.close(fig)

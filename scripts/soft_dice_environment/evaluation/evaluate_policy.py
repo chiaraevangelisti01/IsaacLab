@@ -189,6 +189,29 @@ from isaaclab_tasks.manager_based.manipulation.soft_dice_manipulation.evaluation
 # -----------------------------------------------------------------------------
 # Helpers
 # -----------------------------------------------------------------------------
+SHADOW_VIOLATION_NAMES = {
+    0: "none",
+    1: "object_position",
+    2: "object_orientation",
+    3: "object_position+object_orientation",
+    4: "hand_z",
+    5: "object_position+hand_z",
+    6: "object_orientation+hand_z",
+    7: "object_position+object_orientation+hand_z",
+}
+
+
+def decode_shadow_violation_mask(
+    mask: int,
+) -> str:
+    """Convert the shadow-termination bit mask to a readable label."""
+
+    if mask not in SHADOW_VIOLATION_NAMES:
+        raise ValueError(
+            f"Invalid shadow violation mask: {mask}"
+        )
+
+    return SHADOW_VIOLATION_NAMES[mask]
 
 def get_git_commit() -> str | None:
     try:
@@ -670,6 +693,48 @@ def main():
                         raise RuntimeError(
                             f"Missing terminal snapshot for env {env_id}."
                         )
+
+                    # ---------------------------------------------------------
+                    # Shadow tracking-failure diagnostics.
+                    # ---------------------------------------------------------
+
+                    shadow_mask = int(terminal["shadow_first_violation_mask"][env_id].item())
+                    shadow_step = int(terminal["shadow_first_violation_step"][env_id].item())
+                    shadow_phase = float(terminal["shadow_first_violation_phase"][env_id].item())
+                    shadow_would_terminate = shadow_mask != 0
+
+                    # Consistency checks.
+                    if shadow_would_terminate:
+                        if shadow_step < 0:
+                            raise RuntimeError(
+                                f"Shadow violation recorded but step is invalid for env {env_id}: {shadow_step}"
+                            )
+                        if not torch.isfinite(torch.tensor(shadow_phase)):
+                            raise RuntimeError(
+                                f"Shadow violation recorded but phase is invalid for env {env_id}: {shadow_phase}"
+                            )
+                    elif shadow_step != -1:
+                        raise RuntimeError(
+                            f"No shadow violation recorded but step is {shadow_step} for env {env_id}."
+                        )
+
+                    shadow_name = decode_shadow_violation_mask(shadow_mask)
+                    if shadow_would_terminate:
+                        record["shadow_first_violation_time_s"] = (shadow_step + 1)* float(env.unwrapped.step_dt)
+                    else:
+                        record["shadow_first_violation_time_s"] = float("nan")
+
+                    record.update({
+                        "shadow_would_terminate": shadow_would_terminate,
+                        "shadow_first_violation_mask": shadow_mask,
+                        "shadow_first_violation": shadow_name,
+                        "shadow_first_violation_step": shadow_step,
+                        "shadow_first_violation_phase": shadow_phase,
+                        "shadow_first_object_position": bool(shadow_mask & 1),
+                        "shadow_first_object_orientation": bool(shadow_mask & 2),
+                        "shadow_first_hand_z": bool(shadow_mask & 4),
+                    })
+
                     record.update(
                         robustness_record_from_terminal(
                             terminal=terminal,

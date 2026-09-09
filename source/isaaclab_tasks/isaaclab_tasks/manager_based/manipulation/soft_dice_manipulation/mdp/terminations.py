@@ -15,6 +15,15 @@ from ..utils.geometry_utils import (
     vector_error,
 )
 
+# ---------------------------------------------------------------------
+# Tracking-failure thresholds.
+# ---------------------------------------------------------------------
+
+OBJECT_POSITION_TERMINATION_THRESHOLD_M = 0.25
+OBJECT_ORIENTATION_TERMINATION_THRESHOLD_RAD = 0.8
+HAND_Z_TERMINATION_THRESHOLD_M = 0.25
+
+
 def motion_finished(
     env: ManagerBasedRLEnv,
     command_name: str = "motion",
@@ -35,6 +44,33 @@ def motion_finished(
     return finished
 
 
+def hand_tracking_z_error(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+) -> torch.Tensor:
+    """Absolute Z tracking error of each hand.
+
+    Returns:
+        Tensor of shape [num_envs, num_hands].
+    """
+
+    motion: MotionCommand = env.command_manager.get_term(
+        command_name
+    )
+
+    if not motion.has_hand_reference:
+        raise RuntimeError(
+            "Hand tracking requested, but the motion "
+            "does not contain hand references."
+        )
+
+    hand_pos_ref = motion.aligned_hand_reference()
+
+    return torch.abs(
+        hand_pos_ref[..., 2]
+        - motion.robot_hand_pos[..., 2]
+    )
+
 def bad_motion_body_pos_z_only(
     env: ManagerBasedRLEnv,
     command_name: str,
@@ -48,17 +84,9 @@ def bad_motion_body_pos_z_only(
     )
 
     if include_hands:
-        if not motion.has_hand_reference:
-            raise RuntimeError(
-                "Hand tracking termination requested, but the motion "
-                "does not contain hand references."
-            )
-
-        hand_pos_ref = motion.aligned_hand_reference()
-
-        error = torch.abs(
-            hand_pos_ref[..., 2]
-            - motion.robot_hand_pos[..., 2]
+        error = hand_tracking_z_error(
+            env=env,
+            command_name=command_name,
         )
 
     else:
@@ -84,24 +112,32 @@ def bad_motion_body_pos_z_only(
         dim=-1,
     )
 
-def bad_object_pose(
+def object_pose_errors(
     env: ManagerBasedRLEnv,
     command_name: str,
-    position_threshold: float,
-    orientation_threshold: float,
-) -> torch.Tensor:
-    """Terminate when deformable-dice pose tracking becomes too inaccurate."""
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Return object tracking position and orientation errors.
+
+    Returns:
+        position_error_m:
+            Shape [num_envs], Euclidean position error in metres.
+
+        orientation_error_rad:
+            Shape [num_envs], orientation error in radians.
+    """
 
     motion: MotionCommand = env.command_manager.get_term(
         command_name
     )
 
     if not motion.has_object_reference:
-        return torch.zeros(
+        zeros = torch.zeros(
             env.num_envs,
-            dtype=torch.bool,
+            dtype=torch.float32,
             device=env.device,
         )
+
+        return zeros, zeros
 
     position_error_m = vector_error(
         reference=motion.cube_pos,
@@ -114,6 +150,31 @@ def bad_object_pose(
     )
 
     return (
+        position_error_m,
+        orientation_error_rad,
+    )
+
+def bad_object_pose(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    position_threshold: float,
+    orientation_threshold: float,
+) -> torch.Tensor:
+    """Terminate when deformable-dice pose tracking becomes too inaccurate."""
+
+    (
+        position_error_m,
+        orientation_error_rad,
+    ) = object_pose_errors(
+        env=env,
+        command_name=command_name,
+    )
+
+    return (
         (position_error_m > position_threshold)
-        | (orientation_error_rad > orientation_threshold)
+        |
+        (
+            orientation_error_rad
+            > orientation_threshold
+        )
     )

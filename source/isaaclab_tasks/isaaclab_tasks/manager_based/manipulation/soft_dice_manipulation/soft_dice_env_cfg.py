@@ -598,7 +598,7 @@ class TerminationsCfg:
         func=mdp.bad_motion_body_pos_z_only,
         params={
             "command_name": "motion",
-            "threshold": 0.25,
+            "threshold": mdp.HAND_Z_TERMINATION_THRESHOLD_M,
             "body_names": [
                 "left_elbow_link",
                 "right_elbow_link",
@@ -614,8 +614,12 @@ class TerminationsCfg:
         func=mdp.bad_object_pose,
         params={
             "command_name": "motion",
-            "position_threshold": 0.25,
-            "orientation_threshold": 0.8,
+            "position_threshold": (
+                mdp.OBJECT_POSITION_TERMINATION_THRESHOLD_M
+            ),
+            "orientation_threshold": (
+                mdp.OBJECT_ORIENTATION_TERMINATION_THRESHOLD_RAD
+            ),
         },
     )
 

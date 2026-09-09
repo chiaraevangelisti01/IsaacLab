@@ -51,6 +51,13 @@ _ROBUSTNESS_PLOT_SPECS = {
         "terminal_error_scale": 100.0,
         "terminal_error_label": "Final XY error [cm]",
     },
+    "dynamic_friction": {
+        "perturbation_scale": 1.0,
+        "perturbation_label": "Cube dynamic friction coefficient",
+        "terminal_error_key": "final_xy_position_error_m",
+        "terminal_error_scale": 100.0,
+        "terminal_error_label": "Final XY error [cm]",
+    },
 }
 
 
@@ -348,6 +355,103 @@ def _plot_perturbation_vs_deformation(
 
     return fig
 
+def _plot_dynamic_friction_sensitivity(records: list[dict]):
+    """Plot task performance across the discrete friction levels."""
+
+    friction = np.asarray([r["cube_dynamic_friction"] for r in records], dtype=np.float64)
+    levels = np.unique(friction[np.isfinite(friction)])
+
+    if len(levels) == 0:
+        return None
+
+    landing_aware = "task_success" in records[0]
+
+    if landing_aware:
+        task_success = []
+        position_success = []
+        orientation_success = []
+        landing_error_cm = []
+
+        for level in levels:
+            group = [r for r in records if np.isclose(r["cube_dynamic_friction"], level)]
+
+            task_success.append(100.0 * np.mean([r["task_success"] for r in group]))
+            position_success.append(100.0 * np.mean([r["final_landing_position_success"] for r in group]))
+            orientation_success.append(100.0 * np.mean([r["final_landing_orientation_success"] for r in group]))
+            landing_error_cm.append(100.0 * np.mean([r["final_landing_xy_error_m"] for r in group]))
+
+        fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+
+        axes[0].plot(levels, task_success, marker="o", label="Task success")
+        axes[0].plot(levels, position_success, marker="o", label="Position success")
+        axes[0].plot(levels, orientation_success, marker="o", label="Orientation success")
+        axes[0].set_xlabel("Cube dynamic friction coefficient")
+        axes[0].set_ylabel("Success rate [%]")
+        axes[0].set_ylim(0.0, 100.0)
+        axes[0].set_title("Success vs dynamic friction")
+        axes[0].legend()
+
+        axes[1].plot(levels, landing_error_cm, marker="o")
+        axes[1].set_xlabel("Cube dynamic friction coefficient")
+        axes[1].set_ylabel("Landing XY error [cm]")
+        axes[1].set_title("Landing error vs dynamic friction")
+
+    else:
+        final_xy_error_cm = []
+
+        for level in levels:
+            group = [r for r in records if np.isclose(r["cube_dynamic_friction"], level)]
+            final_xy_error_cm.append(100.0 * np.mean([r["final_xy_position_error_m"] for r in group]))
+
+        fig, ax = plt.subplots(figsize=(7, 5))
+        ax.plot(levels, final_xy_error_cm, marker="o")
+        ax.set_xlabel("Cube dynamic friction coefficient")
+        ax.set_ylabel("Final XY error [cm]")
+        ax.set_title("Final XY error vs dynamic friction")
+
+    fig.tight_layout()
+    return fig
+
+def _plot_dynamic_friction_control(records: list[dict]):
+    """Plot deformation and control effort across friction levels."""
+
+    friction = np.asarray([r["cube_dynamic_friction"] for r in records], dtype=np.float64)
+    levels = np.unique(friction[np.isfinite(friction)])
+
+    if len(levels) == 0:
+        return None
+
+    deformation_mm = []
+    torque_nm = []
+    action_delta = []
+
+    for level in levels:
+        group = [r for r in records if np.isclose(r["cube_dynamic_friction"], level)]
+
+        deformation_mm.append(1000.0 * np.mean([r["deformation_rms_mean_m"] for r in group]))
+        torque_nm.append(np.mean([r["torque_rms_overall_nm"] for r in group]))
+        action_delta.append(np.mean([r["action_delta_rms_overall"] for r in group]))
+
+    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+
+    axes[0].plot(levels, deformation_mm, marker="o")
+    axes[0].set_xlabel("Dynamic friction")
+    axes[0].set_ylabel("Mean RMS deformation [mm]")
+    axes[0].set_title("Deformation")
+
+    axes[1].plot(levels, torque_nm, marker="o")
+    axes[1].set_xlabel("Dynamic friction")
+    axes[1].set_ylabel("Torque RMS [Nm]")
+    axes[1].set_title("Control effort")
+
+    axes[2].plot(levels, action_delta, marker="o")
+    axes[2].set_xlabel("Dynamic friction")
+    axes[2].set_ylabel("Action-delta RMS")
+    axes[2].set_title("Action smoothness")
+
+    fig.suptitle("Control sensitivity to cube dynamic friction")
+    fig.tight_layout()
+    return fig
 
 # -----------------------------------------------------------------------------
 # Public logging entry point.
@@ -403,6 +507,13 @@ def log_robustness_visualizations(
             )
         )
 
+        friction_sensitivity_fig = None
+        friction_control_fig = None
+
+        if condition == "dynamic_friction":
+            friction_sensitivity_fig = _plot_dynamic_friction_sensitivity(condition_records)
+            friction_control_fig = _plot_dynamic_friction_control(condition_records)
+
         prefix = (
             f"robustness/{condition}"
         )
@@ -428,6 +539,11 @@ def log_robustness_visualizations(
                 ),
             }
         )
+        if friction_sensitivity_fig is not None:
+            run.log({
+                f"{prefix}/sensitivity": wandb.Image(friction_sensitivity_fig),
+                f"{prefix}/control_sensitivity": wandb.Image(friction_control_fig),
+            })
 
         plt.close(
             final_xy_fig

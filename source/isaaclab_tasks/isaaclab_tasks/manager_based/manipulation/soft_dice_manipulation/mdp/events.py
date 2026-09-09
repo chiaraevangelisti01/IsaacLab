@@ -9,7 +9,7 @@ import numpy as np
 import isaaclab.utils.math as math_utils
 
 from isaaclab.managers import SceneEntityCfg
-from ..utils.event_utils import get_randomization_buffers
+from ..utils.event_utils import get_randomization_buffers, set_deformable_material_values
 
 if TYPE_CHECKING:
     from isaaclab.assets import Articulation
@@ -397,189 +397,37 @@ def randomize_deformable_material(
 
     env_ids = _env_ids_tensor(env, env_ids)
 
-    randomization = get_randomization_buffers(env)
-
     if env_ids.numel() == 0:
         return
 
-    cube = env.scene[asset_name]
-    material_view = cube.material_physx_view
-
-    if material_view is None:
-        raise RuntimeError(
-            f"Deformable asset '{asset_name}' has no PhysX material view."
-        )
-
-    if material_view.count != cube.num_instances:
-        raise RuntimeError(
-            "Expected one deformable material per cube instance. "
-            f"material_count={material_view.count}, "
-            f"cube_instances={cube.num_instances}."
-        )
-
-    # PhysX deformable material views use the Warp frontend in this setup.
-    # The setter therefore receives Warp arrays, following the official
-    # Omni Physics tensor API examples.
-    material_ids_np = (
-        env_ids.detach()
-        .cpu()
-        .numpy()
-        .astype(np.int32)
-    )
-
-    material_ids_wp = wp.from_numpy(
-        material_ids_np,
-        dtype=wp.int32,
-        device="cpu",
-    )
-
-    # ------------------------------------------------------------------
-    # Young's modulus.
-    # ------------------------------------------------------------------
+    num_envs = env_ids.numel()
+    youngs_modulus = None
+    poissons_ratio = None
+    dynamic_friction = None
 
     if youngs_modulus_range is not None:
         low, high = youngs_modulus_range
-
         if low <= 0.0 or high < low:
-            raise ValueError(
-                "Invalid Young's modulus range: "
-                f"{youngs_modulus_range}."
-            )
-
-        # Getter returns the tensor representation associated with the
-        # material view. Convert it to host NumPy, modify selected rows,
-        # then convert back to the Warp representation expected by PhysX.
-        youngs_modulus_wp = material_view.get_youngs_modulus()
-        youngs_modulus_np = (
-            youngs_modulus_wp.numpy()
-            .copy()
-            .astype(np.float32)
-        )
-
-        sampled = math_utils.sample_uniform(
-            low,
-            high,
-            (env_ids.numel(), 1),
-            env.device,
-        )
-
-        randomization["youngs_modulus_pa"][
-            env_ids
-        ] = sampled[:, 0]
-
-        youngs_modulus_np[material_ids_np] = (
-            sampled.detach()
-            .cpu()
-            .numpy()
-            .astype(np.float32)
-        )
-
-        youngs_modulus_wp = wp.from_numpy(
-            youngs_modulus_np,
-            dtype=wp.float32,
-            device="cpu",
-        )
-
-        material_view.set_youngs_modulus(
-            youngs_modulus_wp,
-            material_ids_wp,
-        )
-
-    # ------------------------------------------------------------------
-    # Poisson's ratio.
-    # ------------------------------------------------------------------
+            raise ValueError(f"Invalid Young's modulus range: {youngs_modulus_range}.")
+        youngs_modulus = math_utils.sample_uniform(low, high, (num_envs,), env.device)
 
     if poissons_ratio_range is not None:
         low, high = poissons_ratio_range
-
         if low < 0.0 or high >= 0.5 or high < low:
-            raise ValueError(
-                "Poisson's ratio must satisfy "
-                f"0 <= nu < 0.5. Got {poissons_ratio_range}."
-            )
-
-        poissons_ratio_wp = material_view.get_poissons_ratio()
-        poissons_ratio_np = (
-            poissons_ratio_wp.numpy()
-            .copy()
-            .astype(np.float32)
-        )
-
-        sampled = math_utils.sample_uniform(
-            low,
-            high,
-            (env_ids.numel(), 1),
-            env.device,
-        )
-
-        randomization["poissons_ratio"][
-            env_ids
-        ] = sampled[:, 0]
-
-        poissons_ratio_np[material_ids_np] = (
-            sampled.detach()
-            .cpu()
-            .numpy()
-            .astype(np.float32)
-        )
-
-        poissons_ratio_wp = wp.from_numpy(
-            poissons_ratio_np,
-            dtype=wp.float32,
-            device="cpu",
-        )
-
-        material_view.set_poissons_ratio(
-            poissons_ratio_wp,
-            material_ids_wp,
-        )
-
-    # ------------------------------------------------------------------
-    # Dynamic friction.
-    # ------------------------------------------------------------------
+            raise ValueError(f"Poisson's ratio must satisfy 0 <= nu < 0.5. Got {poissons_ratio_range}.")
+        poissons_ratio = math_utils.sample_uniform(low, high, (num_envs,), env.device)
 
     if dynamic_friction_range is not None:
         low, high = dynamic_friction_range
-
         if low < 0.0 or high < low:
-            raise ValueError(
-                "Dynamic friction must satisfy "
-                f"0 <= low <= high. Got {dynamic_friction_range}."
-            )
+            raise ValueError(f"Dynamic friction must satisfy 0 <= low <= high. Got {dynamic_friction_range}.")
+        dynamic_friction = math_utils.sample_uniform(low, high, (num_envs,), env.device)
 
-        dynamic_friction_wp = material_view.get_dynamic_friction()
-
-        dynamic_friction_np = (
-            dynamic_friction_wp.numpy()
-            .copy()
-            .astype(np.float32)
-        )
-
-        sampled = math_utils.sample_uniform(
-            low,
-            high,
-            (env_ids.numel(), 1),
-            env.device,
-        )
-
-        dynamic_friction_np[material_ids_np] = (
-            sampled.detach()
-            .cpu()
-            .numpy()
-            .astype(np.float32)
-        )
-
-        dynamic_friction_wp = wp.from_numpy(
-            dynamic_friction_np,
-            dtype=wp.float32,
-            device="cpu",
-        )
-
-        material_view.set_dynamic_friction(
-            dynamic_friction_wp,
-            material_ids_wp,
-        )
-
-        randomization["cube_dynamic_friction"][
-            env_ids
-        ] = sampled[:, 0]
+    set_deformable_material_values(
+        env=env,
+        env_ids=env_ids,
+        asset_name=asset_name,
+        youngs_modulus=youngs_modulus,
+        poissons_ratio=poissons_ratio,
+        dynamic_friction=dynamic_friction,
+    )

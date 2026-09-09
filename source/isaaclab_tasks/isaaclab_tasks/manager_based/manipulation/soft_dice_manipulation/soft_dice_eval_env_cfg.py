@@ -59,30 +59,14 @@ class SoftDiceTrackingEvalEnvCfg(SoftDiceTrackingEnvCfg):
             "command_name": "motion",
             "robot_name": "robot",
             "cube_name": "cube",
-
-            "cube_xy_range_m": (
-                -0.02,
-                0.02,
-            ),
-            "cube_yaw_range_rad": (
-                -np.deg2rad(10.0),
-                np.deg2rad(10.0),
-            ),
-            "youngs_modulus_range_pa": (
-                1.0e4,
-                1.6e4,
-            ),
-            "poissons_ratio_range": (
-                0.30,
-                0.40,
-            ),
-
-            "nominal_youngs_modulus_pa": float(
-                cube_material.youngs_modulus
-            ),
-            "nominal_poissons_ratio": float(
-                cube_material.poissons_ratio
-            ),
+            "cube_xy_range_m": (-0.02,0.02),
+            "cube_yaw_range_rad": (-np.deg2rad(10.0), np.deg2rad(10.0)),
+            "youngs_modulus_range_pa": (1.0e4,1.6e4),
+            "poissons_ratio_range": (0.30,0.40),
+            "nominal_youngs_modulus_pa": float(cube_material.youngs_modulus),
+            "nominal_poissons_ratio": float(cube_material.poissons_ratio),
+            "nominal_dynamic_friction": float(cube_material.dynamic_friction),
+            "dynamic_friction_values": (0.70, 0.85, 1.00, 1.15, 1.30),
         }
         # --------------------------------------------------------------
         # Do not define evaluation success through training termination

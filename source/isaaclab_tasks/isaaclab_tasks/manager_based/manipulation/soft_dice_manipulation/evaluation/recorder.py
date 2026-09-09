@@ -15,9 +15,13 @@ from isaaclab.utils.configclass import configclass
 from ..utils.deformable_utils import compute_deformable_shape_metrics
 from ..utils.geometry_utils import orientation_error, orientation_in_frame, position_in_frame, vector_error, xy_position_error
 from ..utils.motion_utils import H1_HAND_REFERENCE_NAMES, H1_TRACKED_BODY_NAMES
-from .robustness import (
-    initialize_robustness_terminal_buffers,
-    snapshot_robustness_terminal,
+from .robustness import  initialize_robustness_terminal_buffers,snapshot_robustness_terminal
+from ..mdp.terminations import (
+    HAND_Z_TERMINATION_THRESHOLD_M,
+    OBJECT_ORIENTATION_TERMINATION_THRESHOLD_RAD,
+    OBJECT_POSITION_TERMINATION_THRESHOLD_M,
+    hand_tracking_z_error,
+    object_pose_errors,
 )
 
 class SoftDiceEvaluationRecorder(RecorderTerm):
@@ -49,6 +53,36 @@ class SoftDiceEvaluationRecorder(RecorderTerm):
         self._env_ids = torch.arange(
             env.num_envs,
             dtype=torch.long,
+            device=env.device,
+        )
+
+        # ------------------------------------------------------------------
+        # Evaluation does NOT terminate on tracking failures.
+        # Instead, remember the first step at which the normal play/training termination would have fired.
+        #
+        # Bit mask:
+        #   1 -> object position
+        #   2 -> object orientation
+        #   4 -> hand Z tracking.
+        # ------------------------------------------------------------------
+
+        self._shadow_first_violation_mask = torch.zeros(
+            env.num_envs,
+            dtype=torch.long,
+            device=env.device,
+        )
+
+        self._shadow_first_violation_step = torch.full(
+            (env.num_envs,),
+            -1,
+            dtype=torch.long,
+            device=env.device,
+        )
+
+        self._shadow_first_violation_phase = torch.full(
+            (env.num_envs,),
+            float("nan"),
+            dtype=torch.float32,
             device=env.device,
         )
 
@@ -112,6 +146,24 @@ class SoftDiceEvaluationRecorder(RecorderTerm):
             "motion_id": torch.zeros(
                 env.num_envs,
                 dtype=torch.long,
+                device=env.device,
+            ),
+            "shadow_first_violation_mask": torch.zeros(
+                env.num_envs,
+                dtype=torch.long,
+                device=env.device,
+            ),
+
+            "shadow_first_violation_step": torch.full(
+                (env.num_envs,),
+                -1,
+                dtype=torch.long,
+                device=env.device,
+            ),
+            "shadow_first_violation_phase": torch.full(
+                (env.num_envs,),
+                float("nan"),
+                dtype=torch.float32,
                 device=env.device,
             ),
             "position_landing_start_phase": torch.full(
@@ -299,6 +351,82 @@ class SoftDiceEvaluationRecorder(RecorderTerm):
         )
 
         # --------------------------------------------------------------
+        # Shadow tracking terminations --> tracking not actual reset 
+        # --------------------------------------------------------------
+
+        (
+            object_position_error_m,
+            object_orientation_error_rad,
+        ) = object_pose_errors(
+            env=self._env,
+            command_name="motion",
+        )
+
+        hand_z_error_m = hand_tracking_z_error(
+            env=self._env,
+            command_name="motion",
+        )
+
+        object_position_bad = (
+            object_position_error_m
+            > OBJECT_POSITION_TERMINATION_THRESHOLD_M
+        )
+
+        object_orientation_bad = (
+            object_orientation_error_rad
+            > OBJECT_ORIENTATION_TERMINATION_THRESHOLD_RAD
+        )
+
+        hand_z_bad = torch.any(
+            hand_z_error_m
+            > HAND_Z_TERMINATION_THRESHOLD_M,
+            dim=-1,
+        )
+
+        # Encode all violations occurring on this step.
+        current_violation_mask = (
+            object_position_bad.to(torch.long)
+            + 2 * object_orientation_bad.to(torch.long)
+            + 4 * hand_z_bad.to(torch.long)
+        )
+
+        any_violation = current_violation_mask != 0
+
+        # Only record the FIRST violating step of the episode.
+        not_recorded_yet = (
+            self._shadow_first_violation_step < 0
+        )
+
+        first_violation_now = (
+            any_violation
+            & not_recorded_yet
+        )
+
+        first_violation_env_ids = torch.nonzero(
+            first_violation_now,
+            as_tuple=False,
+        ).flatten()
+
+        if first_violation_env_ids.numel() > 0:
+            self._shadow_first_violation_mask[
+                first_violation_env_ids
+            ] = current_violation_mask[
+                first_violation_env_ids
+            ]
+
+            self._shadow_first_violation_step[
+                first_violation_env_ids
+            ] = step_idx[
+                first_violation_env_ids
+            ]
+
+            self._shadow_first_violation_phase[
+                first_violation_env_ids
+            ] = self._motion.phase[
+                first_violation_env_ids
+            ]
+
+        # --------------------------------------------------------------
         # Torque and action smoothness.
         # --------------------------------------------------------------
 
@@ -434,14 +562,14 @@ class SoftDiceEvaluationRecorder(RecorderTerm):
 
         termination_manager = self._env.termination_manager
 
-        output["motion_finished"][env_ids_t] = termination_manager.get_term(
-            "motion_finished"
-        )[env_ids_t]
+        output["motion_finished"][env_ids_t] = termination_manager.get_term( "motion_finished")[env_ids_t]
 
-        output["time_out"][env_ids_t] = termination_manager.get_term(
-            "time_out"
-        )[env_ids_t]
+        output["time_out"][env_ids_t] = termination_manager.get_term("time_out")[env_ids_t]
         output["motion_id"][env_ids_t] = self._motion.motion_id[env_ids_t]
+        
+        output["shadow_first_violation_mask"][env_ids_t] = self._shadow_first_violation_mask[env_ids_t]
+        output["shadow_first_violation_step"][env_ids_t] = self._shadow_first_violation_step[env_ids_t]
+        output["shadow_first_violation_phase"][env_ids_t] = self._shadow_first_violation_phase[env_ids_t]
 
         if self._motion.cfg.phase_metadata_file:
             output["position_landing_start_phase"][env_ids_t] = self._motion.position_landing_start_phase[env_ids_t]
@@ -454,6 +582,34 @@ class SoftDiceEvaluationRecorder(RecorderTerm):
         )
 
         return None, None
+
+def record_post_reset(
+    self,
+    env_ids: Sequence[int] | None,
+) -> tuple[None, None]:
+    """Reset per-episode shadow-termination bookkeeping."""
+
+    if env_ids is None:
+        env_ids_t = torch.arange(
+            self._env.num_envs,
+            dtype=torch.long,
+            device=self._env.device,
+        )
+    else:
+        env_ids_t = torch.as_tensor(
+            env_ids,
+            dtype=torch.long,
+            device=self._env.device,
+        )
+
+    if env_ids_t.numel() == 0:
+        return None, None
+
+    self._shadow_first_violation_mask[env_ids_t] = 0
+    self._shadow_first_violation_step[env_ids_t] = -1
+    self._shadow_first_violation_phase[env_ids_t] = float("nan")
+
+    return None, None
 
 
 @configclass

@@ -22,6 +22,7 @@ ROBUSTNESS_CONDITIONS = (
     "initial_yaw",
     "youngs_modulus",
     "poissons_ratio",
+    "dynamic_friction",
 )
 
 ROBUSTNESS_CONDITION_TO_ID = {
@@ -118,6 +119,8 @@ def reset_to_motion_start_with_robustness(
     ),
     nominal_youngs_modulus_pa: float = 1.5e4,
     nominal_poissons_ratio: float = 0.37,
+    dynamic_friction_values: tuple[float, ...] = (0.70, 0.85, 1.00, 1.15, 1.30),
+    nominal_dynamic_friction: float = 1.0,
 ):
     """Reset with one balanced robustness condition per environment."""
 
@@ -190,6 +193,7 @@ def reset_to_motion_start_with_robustness(
     robustness["applied_perturbation"][
         env_ids
     ] = 0.0
+    
 
     num_envs = env_ids.numel()
 
@@ -228,6 +232,10 @@ def reset_to_motion_start_with_robustness(
     poissons_mask = (
         condition_ids
         == ROBUSTNESS_CONDITION_TO_ID["poissons_ratio"]
+    )
+    friction_mask = (
+        condition_ids
+        == ROBUSTNESS_CONDITION_TO_ID["dynamic_friction"]
     )
 
     if torch.any(x_mask):
@@ -299,6 +307,12 @@ def reset_to_motion_start_with_robustness(
         dtype=torch.float32,
         device=env.device,
     )
+    dynamic_friction = torch.full(
+        (num_envs,),
+        nominal_dynamic_friction,
+        dtype=torch.float32,
+        device=env.device,
+    )
 
     if torch.any(youngs_mask):
         youngs_modulus[youngs_mask] = (
@@ -320,6 +334,53 @@ def reset_to_motion_start_with_robustness(
             )
         )
 
+    friction_levels = torch.as_tensor(
+        dynamic_friction_values,
+        dtype=torch.float32,
+        device=env.device,
+    )
+
+    num_friction_levels = friction_levels.numel()
+
+    if "friction_level_counts" not in robustness:
+        robustness["friction_level_counts"] = torch.zeros(
+            (motion.num_motions, num_friction_levels),
+            dtype=torch.long,
+            device=env.device,
+        )
+
+    friction_level_counts = robustness["friction_level_counts"]
+
+    for motion_id in range(motion.num_motions):
+        local_indices = torch.nonzero(
+            (motion_ids == motion_id) & friction_mask,
+            as_tuple=False,
+        ).flatten()
+
+        if local_indices.numel() == 0:
+            continue
+
+        start_level = torch.remainder(
+            friction_level_counts[motion_id].sum(),
+            num_friction_levels,
+        )
+
+        assigned_level_ids = torch.remainder(
+            torch.arange(
+                local_indices.numel(),
+                dtype=torch.long,
+                device=env.device,
+            ) + start_level,
+            num_friction_levels,
+        )
+
+        dynamic_friction[local_indices] = friction_levels[assigned_level_ids]
+
+        friction_level_counts[motion_id] += torch.bincount(
+            assigned_level_ids,
+            minlength=num_friction_levels,
+        )
+
     # ONE material update for all affected environments.
     set_deformable_material_values(
         env=env,
@@ -327,6 +388,7 @@ def reset_to_motion_start_with_robustness(
         asset_name=cube_name,
         youngs_modulus=youngs_modulus,
         poissons_ratio=poissons_ratio,
+        dynamic_friction=dynamic_friction,
     )
 
     # ------------------------------------------------------------------
@@ -343,21 +405,12 @@ def reset_to_motion_start_with_robustness(
         device=env.device,
     )
 
-    local_applied[x_mask] = (
-        position_offset[x_mask, 0]
-    )
-    local_applied[y_mask] = (
-        position_offset[y_mask, 1]
-    )
-    local_applied[yaw_mask] = (
-        orientation_offset[yaw_mask, 2]
-    )
-    local_applied[youngs_mask] = (
-        youngs_modulus[youngs_mask]
-    )
-    local_applied[poissons_mask] = (
-        poissons_ratio[poissons_mask]
-    )
+    local_applied[x_mask] = position_offset[x_mask, 0]
+    local_applied[y_mask] = position_offset[y_mask, 1]
+    local_applied[yaw_mask] = orientation_offset[yaw_mask, 2]
+    local_applied[youngs_mask] = youngs_modulus[youngs_mask]
+    local_applied[poissons_mask] = poissons_ratio[poissons_mask]
+    local_applied[friction_mask] = dynamic_friction[friction_mask]
 
     applied[env_ids] = local_applied
 
@@ -402,6 +455,12 @@ def initialize_robustness_terminal_buffers(
                 dtype=torch.float32,
                 device=env.device,
             ),
+            "cube_dynamic_friction": torch.full(
+                (env.num_envs,),
+                float("nan"),
+                dtype=torch.float32,
+                device=env.device,
+            ),
         }
     )
 
@@ -416,39 +475,13 @@ def snapshot_robustness_terminal(
     robustness = get_robustness_buffers(env)
     randomization = get_randomization_buffers(env)
 
-    output["robustness_condition_id"][
-        env_ids
-    ] = robustness["condition_id"][env_ids]
-
-    output["applied_perturbation"][
-        env_ids
-    ] = robustness[
-        "applied_perturbation"
-    ][env_ids]
-
-    output["initial_cube_position_offset_m"][
-        env_ids
-    ] = randomization[
-        "cube_position_offset_m"
-    ][env_ids]
-
-    output["initial_cube_yaw_offset_rad"][
-        env_ids
-    ] = randomization[
-        "cube_yaw_offset_rad"
-    ][env_ids]
-
-    output["youngs_modulus_pa"][
-        env_ids
-    ] = randomization[
-        "youngs_modulus_pa"
-    ][env_ids]
-
-    output["poissons_ratio"][
-        env_ids
-    ] = randomization[
-        "poissons_ratio"
-    ][env_ids]
+    output["robustness_condition_id"][env_ids] = robustness["condition_id"][env_ids]
+    output["applied_perturbation"][env_ids] = robustness["applied_perturbation"][env_ids]
+    output["initial_cube_position_offset_m"][env_ids] = randomization["cube_position_offset_m"][env_ids]
+    output["initial_cube_yaw_offset_rad"][env_ids] = randomization["cube_yaw_offset_rad"][env_ids]
+    output["youngs_modulus_pa"][env_ids] = randomization["youngs_modulus_pa"][env_ids]
+    output["poissons_ratio"][env_ids] = randomization["poissons_ratio"][env_ids]
+    output["cube_dynamic_friction"][env_ids] = randomization["cube_dynamic_friction"][env_ids]
 
 
 def robustness_record_from_terminal(
@@ -477,37 +510,14 @@ def robustness_record_from_terminal(
 
     return {
         "robustness_condition_id": condition_id,
-        "robustness_condition": (
-            ROBUSTNESS_CONDITIONS[
-                condition_id
-            ]
-        ),
-        "applied_perturbation": float(
-            terminal[
-                "applied_perturbation"
-            ][env_id].item()
-        ),
-        "initial_cube_x_offset_m": float(
-            position_offset[0].item()
-        ),
-        "initial_cube_y_offset_m": float(
-            position_offset[1].item()
-        ),
-        "initial_cube_yaw_offset_rad": float(
-            terminal[
-                "initial_cube_yaw_offset_rad"
-            ][env_id].item()
-        ),
-        "youngs_modulus_pa": float(
-            terminal[
-                "youngs_modulus_pa"
-            ][env_id].item()
-        ),
-        "poissons_ratio": float(
-            terminal[
-                "poissons_ratio"
-            ][env_id].item()
-        ),
+        "robustness_condition": ROBUSTNESS_CONDITIONS[condition_id],
+        "applied_perturbation": float(terminal["applied_perturbation"][env_id].item()),
+        "initial_cube_x_offset_m": float(position_offset[0].item()),
+        "initial_cube_y_offset_m": float(position_offset[1].item()),
+        "initial_cube_yaw_offset_rad": float(terminal["initial_cube_yaw_offset_rad"][env_id].item()),
+        "youngs_modulus_pa": float(terminal["youngs_modulus_pa"][env_id].item()),
+        "poissons_ratio": float(terminal["poissons_ratio"][env_id].item()),
+        "cube_dynamic_friction": float(terminal["cube_dynamic_friction"][env_id].item()),
     }
 
 
