@@ -2,12 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from isaaclab.managers import (
-    ObservationTermCfg as ObsTerm,
-)
-from isaaclab.managers import (
-    RewardTermCfg as RewTerm,
-)
+import isaaclab.envs.mdp as base_mdp
+from isaaclab.managers import ObservationTermCfg as ObsTerm
+from isaaclab.managers import RewardTermCfg as RewTerm
+from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils.configclass import configclass
 
 from . import mdp
@@ -15,6 +13,7 @@ from .soft_dice_env_cfg import (
     ObservationsCfg,
     RewardsCfg,
     SoftDiceTrackingEnvCfg,
+    H1_TRACKING_JOINT_NAMES,
 )
 
 
@@ -220,6 +219,20 @@ class LandingAwareRewardsCfg(
             "command_name": "motion",
         },
     )
+
+    #Torque ablaiton
+
+    joint_torque = RewTerm(
+    func=base_mdp.joint_torques_l2,
+    weight=-1.0e-4,
+    params={
+        "asset_cfg": SceneEntityCfg(
+            "robot",
+            joint_names=H1_TRACKING_JOINT_NAMES,
+            preserve_order=True,
+        ),
+    },
+)
 
 
 # ======================================================================
