@@ -4,7 +4,7 @@
     "orientation_threshold_deg": 15.0,
     "landing_radius_m": 0.025,
     "position_region_tolerance_m": 0.06,
-    "release_distance_m": 0.22,
+    "release_distance_m": 0.21,
     "start_frame": 0
   },
   "definitions": {
@@ -32,28 +32,28 @@
       "max_xy_excursion_frame": 1878,
       "max_xy_excursion_time_s": 37.56,
       "max_xy_excursion_from_landing_center_m": 0.05376330780355594,
-      "release_frame": 1977,
-      "release_time_s": 39.54,
-      "release_phase": 0.7911164465786314,
+      "release_frame": 1968,
+      "release_time_s": 39.36,
+      "release_phase": 0.787515006002401,
       "release_found": true,
       "orientation_blend_phase": [
         0.6762705082032813,
-        0.7911164465786314
+        0.787515006002401
       ],
       "position_blend_phase": [
         0.751500600240096,
-        0.7911164465786314
+        0.787515006002401
       ],
-      "orientation_blend_duration_s": 5.74,
-      "position_blend_duration_s": 1.98,
+      "orientation_blend_duration_s": 5.56,
+      "position_blend_duration_s": 1.8,
       "orientation_error_at_landing_start_deg": 14.834052831850457,
       "position_region_distance_at_landing_start_m": 0.02876330780355594,
       "max_remaining_position_region_distance_at_landing_start_m": 0.02876330780355594,
-      "closest_hand_distance_at_release_m": 0.22104326763471785,
+      "closest_hand_distance_at_release_m": 0.21012719268948774,
       "minimum_hand_distance_m": 0.18704297235265574,
-      "remaining_xy_net_after_release_m": 0.0002497380741052961,
-      "remaining_xy_path_after_release_m": 0.047313000770397476,
-      "max_xy_excursion_after_release_m": 0.001181228022884888
+      "remaining_xy_net_after_release_m": 0.0021600019086853396,
+      "remaining_xy_path_after_release_m": 0.049846413981208426,
+      "max_xy_excursion_after_release_m": 0.002480804709009324
     },
     "Traj10_fists_fps60to50.npz": {
       "fps": 50.0,
@@ -74,28 +74,28 @@
       "max_xy_excursion_frame": 939,
       "max_xy_excursion_time_s": 18.78,
       "max_xy_excursion_from_landing_center_m": 0.05376330780355594,
-      "release_frame": 989,
-      "release_time_s": 19.78,
-      "release_phase": 0.7918334667734187,
+      "release_frame": 984,
+      "release_time_s": 19.68,
+      "release_phase": 0.7878302642113691,
       "release_found": true,
       "orientation_blend_phase": [
         0.6765412329863891,
-        0.7918334667734187
+        0.7878302642113691
       ],
       "position_blend_phase": [
         0.7518014411529224,
-        0.7918334667734187
+        0.7878302642113691
       ],
-      "orientation_blend_duration_s": 2.88,
-      "position_blend_duration_s": 1.0,
+      "orientation_blend_duration_s": 2.78,
+      "position_blend_duration_s": 0.9,
       "orientation_error_at_landing_start_deg": 14.836703135336924,
       "position_region_distance_at_landing_start_m": 0.02876330780355594,
       "max_remaining_position_region_distance_at_landing_start_m": 0.02876330780355594,
-      "closest_hand_distance_at_release_m": 0.222478524209244,
+      "closest_hand_distance_at_release_m": 0.2101260059496818,
       "minimum_hand_distance_m": 0.18277984834524338,
-      "remaining_xy_net_after_release_m": 0.00014245647577895303,
-      "remaining_xy_path_after_release_m": 0.039280887782005905,
-      "max_xy_excursion_after_release_m": 0.0009131750724641829
+      "remaining_xy_net_after_release_m": 0.002153254327992069,
+      "remaining_xy_path_after_release_m": 0.04181731920797256,
+      "max_xy_excursion_after_release_m": 0.002470450951805562
     },
     "Traj10_fists_symmetric_fps50.npz": {
       "fps": 50.0,
@@ -116,28 +116,28 @@
       "max_xy_excursion_frame": 1878,
       "max_xy_excursion_time_s": 37.56,
       "max_xy_excursion_from_landing_center_m": 0.05376324471220588,
-      "release_frame": 1977,
-      "release_time_s": 39.54,
-      "release_phase": 0.7911164465786314,
+      "release_frame": 1968,
+      "release_time_s": 39.36,
+      "release_phase": 0.787515006002401,
       "release_found": true,
       "orientation_blend_phase": [
         0.6762705082032813,
-        0.7911164465786314
+        0.787515006002401
       ],
       "position_blend_phase": [
         0.751500600240096,
-        0.7911164465786314
+        0.787515006002401
       ],
-      "orientation_blend_duration_s": 5.74,
-      "position_blend_duration_s": 1.98,
+      "orientation_blend_duration_s": 5.56,
+      "position_blend_duration_s": 1.8,
       "orientation_error_at_landing_start_deg": 14.834047970760759,
       "position_region_distance_at_landing_start_m": 0.028763244712205878,
       "max_remaining_position_region_distance_at_landing_start_m": 0.028763244712205878,
-      "closest_hand_distance_at_release_m": 0.22104329384781332,
+      "closest_hand_distance_at_release_m": 0.21012718128809432,
       "minimum_hand_distance_m": 0.18704308043992796,
-      "remaining_xy_net_after_release_m": 0.0002497572741410222,
-      "remaining_xy_path_after_release_m": 0.047314940881554184,
-      "max_xy_excursion_after_release_m": 0.0011813396703862688
+      "remaining_xy_net_after_release_m": 0.0021599911985626095,
+      "remaining_xy_path_after_release_m": 0.04984834915623727,
+      "max_xy_excursion_after_release_m": 0.0024808022676677697
     },
     "Traj10_fists_symmetric_fps60to50.npz": {
       "fps": 50.0,
@@ -158,28 +158,28 @@
       "max_xy_excursion_frame": 939,
       "max_xy_excursion_time_s": 18.78,
       "max_xy_excursion_from_landing_center_m": 0.05376324471220588,
-      "release_frame": 989,
-      "release_time_s": 19.78,
-      "release_phase": 0.7918334667734187,
+      "release_frame": 984,
+      "release_time_s": 19.68,
+      "release_phase": 0.7878302642113691,
       "release_found": true,
       "orientation_blend_phase": [
         0.6765412329863891,
-        0.7918334667734187
+        0.7878302642113691
       ],
       "position_blend_phase": [
         0.7518014411529224,
-        0.7918334667734187
+        0.7878302642113691
       ],
-      "orientation_blend_duration_s": 2.88,
-      "position_blend_duration_s": 1.0,
+      "orientation_blend_duration_s": 2.78,
+      "position_blend_duration_s": 0.9,
       "orientation_error_at_landing_start_deg": 14.836698367154998,
       "position_region_distance_at_landing_start_m": 0.028763244712205878,
       "max_remaining_position_region_distance_at_landing_start_m": 0.028763244712205878,
-      "closest_hand_distance_at_release_m": 0.22247866822784135,
+      "closest_hand_distance_at_release_m": 0.21012718128809432,
       "minimum_hand_distance_m": 0.18706273193513265,
-      "remaining_xy_net_after_release_m": 0.0001424544681800369,
-      "remaining_xy_path_after_release_m": 0.039282348440899104,
-      "max_xy_excursion_after_release_m": 0.0009132720244570145
+      "remaining_xy_net_after_release_m": 0.0021532400546276035,
+      "remaining_xy_path_after_release_m": 0.04181872722145113,
+      "max_xy_excursion_after_release_m": 0.002470449249833667
     },
     "Traj21_fists_fps60to50.npz": {
       "fps": 50.0,
@@ -200,28 +200,28 @@
       "max_xy_excursion_frame": 741,
       "max_xy_excursion_time_s": 14.82,
       "max_xy_excursion_from_landing_center_m": 0.03696730603099022,
-      "release_frame": 950,
-      "release_time_s": 19.0,
-      "release_phase": 1.0,
-      "release_found": false,
+      "release_frame": 894,
+      "release_time_s": 17.88,
+      "release_phase": 0.9410526315789474,
+      "release_found": true,
       "orientation_blend_phase": [
         0.6957894736842105,
-        1.0
+        0.9410526315789474
       ],
       "position_blend_phase": [
         0.78,
-        1.0
+        0.9410526315789474
       ],
-      "orientation_blend_duration_s": 5.78,
-      "position_blend_duration_s": 4.18,
+      "orientation_blend_duration_s": 4.66,
+      "position_blend_duration_s": 3.06,
       "orientation_error_at_landing_start_deg": 14.949524194515098,
       "position_region_distance_at_landing_start_m": 0.011967306030990221,
       "max_remaining_position_region_distance_at_landing_start_m": 0.011967306030990221,
-      "closest_hand_distance_at_release_m": 0.2169207870578823,
+      "closest_hand_distance_at_release_m": 0.2100395839207297,
       "minimum_hand_distance_m": 0.19404798214671143,
-      "remaining_xy_net_after_release_m": 0.0,
-      "remaining_xy_path_after_release_m": 0.0,
-      "max_xy_excursion_after_release_m": 0.0
+      "remaining_xy_net_after_release_m": 8.119447887679707e-05,
+      "remaining_xy_path_after_release_m": 0.0030166712580270982,
+      "max_xy_excursion_after_release_m": 0.00018647396709092607
     },
     "Traj21_fists_symmetric_fps60to50.npz": {
       "fps": 50.0,
@@ -242,28 +242,28 @@
       "max_xy_excursion_frame": 741,
       "max_xy_excursion_time_s": 14.82,
       "max_xy_excursion_from_landing_center_m": 0.03696726564163695,
-      "release_frame": 950,
-      "release_time_s": 19.0,
-      "release_phase": 1.0,
-      "release_found": false,
+      "release_frame": 894,
+      "release_time_s": 17.88,
+      "release_phase": 0.9410526315789474,
+      "release_found": true,
       "orientation_blend_phase": [
         0.6957894736842105,
-        1.0
+        0.9410526315789474
       ],
       "position_blend_phase": [
         0.78,
-        1.0
+        0.9410526315789474
       ],
-      "orientation_blend_duration_s": 5.78,
-      "position_blend_duration_s": 4.18,
+      "orientation_blend_duration_s": 4.66,
+      "position_blend_duration_s": 3.06,
       "orientation_error_at_landing_start_deg": 14.94951494661665,
       "position_region_distance_at_landing_start_m": 0.01196726564163695,
       "max_remaining_position_region_distance_at_landing_start_m": 0.01196726564163695,
-      "closest_hand_distance_at_release_m": 0.21692078403600656,
+      "closest_hand_distance_at_release_m": 0.21003955953538647,
       "minimum_hand_distance_m": 0.19404797492670828,
-      "remaining_xy_net_after_release_m": 0.0,
-      "remaining_xy_path_after_release_m": 0.0,
-      "max_xy_excursion_after_release_m": 0.0
+      "remaining_xy_net_after_release_m": 8.11986793063839e-05,
+      "remaining_xy_path_after_release_m": 0.0030150257952663686,
+      "max_xy_excursion_after_release_m": 0.00018642873200791995
     },
     "Traj24_fists_fps60to50.npz": {
       "fps": 50.0,
@@ -284,28 +284,28 @@
       "max_xy_excursion_frame": 202,
       "max_xy_excursion_time_s": 4.04,
       "max_xy_excursion_from_landing_center_m": 0.17821028122588475,
-      "release_frame": 937,
-      "release_time_s": 18.74,
-      "release_phase": 0.935129740518962,
+      "release_frame": 933,
+      "release_time_s": 18.66,
+      "release_phase": 0.9311377245508982,
       "release_found": true,
       "orientation_blend_phase": [
         0.4870259481037924,
-        0.935129740518962
+        0.9311377245508982
       ],
       "position_blend_phase": [
         0.7614770459081837,
-        0.935129740518962
+        0.9311377245508982
       ],
-      "orientation_blend_duration_s": 8.98,
-      "position_blend_duration_s": 3.48,
+      "orientation_blend_duration_s": 8.9,
+      "position_blend_duration_s": 3.4,
       "orientation_error_at_landing_start_deg": 14.871423429000137,
       "position_region_distance_at_landing_start_m": 0.05920142297024777,
       "max_remaining_position_region_distance_at_landing_start_m": 0.05920142297024777,
-      "closest_hand_distance_at_release_m": 0.22080234159844506,
+      "closest_hand_distance_at_release_m": 0.21142484783885954,
       "minimum_hand_distance_m": 0.18943756800495348,
-      "remaining_xy_net_after_release_m": 0.0006560017450035618,
-      "remaining_xy_path_after_release_m": 0.006176223704727585,
-      "max_xy_excursion_after_release_m": 0.0007350658327187794
+      "remaining_xy_net_after_release_m": 0.0003610051152814234,
+      "remaining_xy_path_after_release_m": 0.007239767074143314,
+      "max_xy_excursion_after_release_m": 0.0004356822293354821
     },
     "Traj24_fists_symmetric_fps60to50.npz": {
       "fps": 50.0,
@@ -326,28 +326,28 @@
       "max_xy_excursion_frame": 202,
       "max_xy_excursion_time_s": 4.04,
       "max_xy_excursion_from_landing_center_m": 0.17821047492192152,
-      "release_frame": 937,
-      "release_time_s": 18.74,
-      "release_phase": 0.935129740518962,
+      "release_frame": 933,
+      "release_time_s": 18.66,
+      "release_phase": 0.9311377245508982,
       "release_found": true,
       "orientation_blend_phase": [
         0.4870259481037924,
-        0.935129740518962
+        0.9311377245508982
       ],
       "position_blend_phase": [
         0.7614770459081837,
-        0.935129740518962
+        0.9311377245508982
       ],
-      "orientation_blend_duration_s": 8.98,
-      "position_blend_duration_s": 3.48,
+      "orientation_blend_duration_s": 8.9,
+      "position_blend_duration_s": 3.4,
       "orientation_error_at_landing_start_deg": 14.871425720388494,
       "position_region_distance_at_landing_start_m": 0.059201354735895294,
       "max_remaining_position_region_distance_at_landing_start_m": 0.059201354735895294,
-      "closest_hand_distance_at_release_m": 0.22080235852414984,
+      "closest_hand_distance_at_release_m": 0.21142488783298277,
       "minimum_hand_distance_m": 0.18943770271610294,
-      "remaining_xy_net_after_release_m": 0.0006559605410056169,
-      "remaining_xy_path_after_release_m": 0.00617663248367959,
-      "max_xy_excursion_after_release_m": 0.0007350178375637503
+      "remaining_xy_net_after_release_m": 0.000361033594511822,
+      "remaining_xy_path_after_release_m": 0.007240377426437389,
+      "max_xy_excursion_after_release_m": 0.00043569684171974486
     },
     "Traj27_fists_fps60to50.npz": {
       "fps": 50.0,
@@ -368,28 +368,28 @@
       "max_xy_excursion_frame": 457,
       "max_xy_excursion_time_s": 9.14,
       "max_xy_excursion_from_landing_center_m": 0.1626737818852487,
-      "release_frame": 702,
-      "release_time_s": 14.04,
-      "release_phase": 0.9682758620689655,
+      "release_frame": 697,
+      "release_time_s": 13.94,
+      "release_phase": 0.9613793103448276,
       "release_found": true,
       "orientation_blend_phase": [
         0.7034482758620689,
-        0.9682758620689655
+        0.9613793103448276
       ],
       "position_blend_phase": [
         0.6951724137931035,
-        0.9682758620689655
+        0.9613793103448276
       ],
-      "orientation_blend_duration_s": 3.84,
-      "position_blend_duration_s": 3.96,
+      "orientation_blend_duration_s": 3.74,
+      "position_blend_duration_s": 3.86,
       "orientation_error_at_landing_start_deg": 14.944864836173737,
       "position_region_distance_at_landing_start_m": 0.058807443877497916,
       "max_remaining_position_region_distance_at_landing_start_m": 0.058807443877497916,
-      "closest_hand_distance_at_release_m": 0.22107620596979413,
+      "closest_hand_distance_at_release_m": 0.2115659886668821,
       "minimum_hand_distance_m": 0.19096521983380982,
-      "remaining_xy_net_after_release_m": 0.00012012475878519377,
-      "remaining_xy_path_after_release_m": 0.0005001088248165006,
-      "max_xy_excursion_after_release_m": 0.00012012475878519377
+      "remaining_xy_net_after_release_m": 9.516515738305514e-05,
+      "remaining_xy_path_after_release_m": 0.0005870981624730771,
+      "max_xy_excursion_after_release_m": 9.516515738305514e-05
     },
     "Traj27_fists_symmetric_fps60to50.npz": {
       "fps": 50.0,
@@ -410,28 +410,28 @@
       "max_xy_excursion_frame": 457,
       "max_xy_excursion_time_s": 9.14,
       "max_xy_excursion_from_landing_center_m": 0.16267364506340276,
-      "release_frame": 702,
-      "release_time_s": 14.04,
-      "release_phase": 0.9682758620689655,
+      "release_frame": 697,
+      "release_time_s": 13.94,
+      "release_phase": 0.9613793103448276,
       "release_found": true,
       "orientation_blend_phase": [
         0.7034482758620689,
-        0.9682758620689655
+        0.9613793103448276
       ],
       "position_blend_phase": [
         0.6951724137931035,
-        0.9682758620689655
+        0.9613793103448276
       ],
-      "orientation_blend_duration_s": 3.84,
-      "position_blend_duration_s": 3.96,
+      "orientation_blend_duration_s": 3.74,
+      "position_blend_duration_s": 3.86,
       "orientation_error_at_landing_start_deg": 14.944869191772117,
       "position_region_distance_at_landing_start_m": 0.058807287502058415,
       "max_remaining_position_region_distance_at_landing_start_m": 0.058807287502058415,
-      "closest_hand_distance_at_release_m": 0.2210762124009865,
+      "closest_hand_distance_at_release_m": 0.2115660215578658,
       "minimum_hand_distance_m": 0.1909652260052469,
-      "remaining_xy_net_after_release_m": 0.00012016603867063355,
-      "remaining_xy_path_after_release_m": 0.0004997761930482388,
-      "max_xy_excursion_after_release_m": 0.00012016603867063355
+      "remaining_xy_net_after_release_m": 9.521718408710767e-05,
+      "remaining_xy_path_after_release_m": 0.000586590241986815,
+      "max_xy_excursion_after_release_m": 9.521718408710767e-05
     },
     "Traj28_fists_fps60to50.npz": {
       "fps": 50.0,
@@ -452,28 +452,28 @@
       "max_xy_excursion_frame": 225,
       "max_xy_excursion_time_s": 4.5,
       "max_xy_excursion_from_landing_center_m": 0.21982341672520336,
-      "release_frame": 798,
-      "release_time_s": 15.96,
-      "release_phase": 1.0,
-      "release_found": false,
+      "release_frame": 577,
+      "release_time_s": 11.54,
+      "release_phase": 0.7230576441102757,
+      "release_found": true,
       "orientation_blend_phase": [
         0.606516290726817,
-        1.0
+        0.7230576441102757
       ],
       "position_blend_phase": [
         0.5488721804511278,
-        1.0
+        0.7230576441102757
       ],
-      "orientation_blend_duration_s": 6.28,
-      "position_blend_duration_s": 7.2,
+      "orientation_blend_duration_s": 1.86,
+      "position_blend_duration_s": 2.78,
       "orientation_error_at_landing_start_deg": 14.943228096516743,
       "position_region_distance_at_landing_start_m": 0.059637541534180306,
       "max_remaining_position_region_distance_at_landing_start_m": 0.059637541534180306,
-      "closest_hand_distance_at_release_m": 0.21159056023964504,
+      "closest_hand_distance_at_release_m": 0.21384777154811727,
       "minimum_hand_distance_m": 0.19287476815961582,
-      "remaining_xy_net_after_release_m": 0.0,
-      "remaining_xy_path_after_release_m": 0.0,
-      "max_xy_excursion_after_release_m": 0.0
+      "remaining_xy_net_after_release_m": 0.08757371623343509,
+      "remaining_xy_path_after_release_m": 0.09817517891530203,
+      "max_xy_excursion_after_release_m": 0.08898343738887528
     },
     "Traj28_fists_symmetric_fps60to50.npz": {
       "fps": 50.0,
@@ -494,28 +494,28 @@
       "max_xy_excursion_frame": 225,
       "max_xy_excursion_time_s": 4.5,
       "max_xy_excursion_from_landing_center_m": 0.2198235884077523,
-      "release_frame": 798,
-      "release_time_s": 15.96,
-      "release_phase": 1.0,
-      "release_found": false,
+      "release_frame": 577,
+      "release_time_s": 11.54,
+      "release_phase": 0.7230576441102757,
+      "release_found": true,
       "orientation_blend_phase": [
         0.606516290726817,
-        1.0
+        0.7230576441102757
       ],
       "position_blend_phase": [
         0.5488721804511278,
-        1.0
+        0.7230576441102757
       ],
-      "orientation_blend_duration_s": 6.28,
-      "position_blend_duration_s": 7.2,
+      "orientation_blend_duration_s": 1.86,
+      "position_blend_duration_s": 2.78,
       "orientation_error_at_landing_start_deg": 14.943225008595338,
       "position_region_distance_at_landing_start_m": 0.059637609532650175,
       "max_remaining_position_region_distance_at_landing_start_m": 0.059637609532650175,
-      "closest_hand_distance_at_release_m": 0.2115905893995451,
+      "closest_hand_distance_at_release_m": 0.21384773952701147,
       "minimum_hand_distance_m": 0.1928746680367622,
-      "remaining_xy_net_after_release_m": 0.0,
-      "remaining_xy_path_after_release_m": 0.0,
-      "max_xy_excursion_after_release_m": 0.0
+      "remaining_xy_net_after_release_m": 0.08757386470869459,
+      "remaining_xy_path_after_release_m": 0.09817465646686327,
+      "max_xy_excursion_after_release_m": 0.08898357868045342
     },
     "Traj30_fists_fps60to50.npz": {
       "fps": 50.0,
@@ -536,28 +536,28 @@
       "max_xy_excursion_frame": 439,
       "max_xy_excursion_time_s": 8.78,
       "max_xy_excursion_from_landing_center_m": 0.15715483432197072,
-      "release_frame": 625,
-      "release_time_s": 12.5,
-      "release_phase": 0.9137426900584795,
+      "release_frame": 621,
+      "release_time_s": 12.42,
+      "release_phase": 0.9078947368421053,
       "release_found": true,
       "orientation_blend_phase": [
         0.716374269005848,
-        0.9137426900584795
+        0.9078947368421053
       ],
       "position_blend_phase": [
         0.6915204678362573,
-        0.9137426900584795
+        0.9078947368421053
       ],
-      "orientation_blend_duration_s": 2.7,
-      "position_blend_duration_s": 3.04,
+      "orientation_blend_duration_s": 2.62,
+      "position_blend_duration_s": 2.96,
       "orientation_error_at_landing_start_deg": 14.720312178434156,
       "position_region_distance_at_landing_start_m": 0.05737584868562436,
       "max_remaining_position_region_distance_at_landing_start_m": 0.05737584868562436,
-      "closest_hand_distance_at_release_m": 0.2210265876347822,
+      "closest_hand_distance_at_release_m": 0.21110965758828512,
       "minimum_hand_distance_m": 0.1887926110289352,
-      "remaining_xy_net_after_release_m": 0.001526474952697754,
-      "remaining_xy_path_after_release_m": 0.010808375622718143,
-      "max_xy_excursion_after_release_m": 0.0026021279981615375
+      "remaining_xy_net_after_release_m": 0.0018410260377327051,
+      "remaining_xy_path_after_release_m": 0.011392679782337415,
+      "max_xy_excursion_after_release_m": 0.002902411856773149
     },
     "Traj30_fists_symmetric_fps60to50.npz": {
       "fps": 50.0,
@@ -578,28 +578,28 @@
       "max_xy_excursion_frame": 439,
       "max_xy_excursion_time_s": 8.78,
       "max_xy_excursion_from_landing_center_m": 0.15715478185848383,
-      "release_frame": 625,
-      "release_time_s": 12.5,
-      "release_phase": 0.9137426900584795,
+      "release_frame": 621,
+      "release_time_s": 12.42,
+      "release_phase": 0.9078947368421053,
       "release_found": true,
       "orientation_blend_phase": [
         0.716374269005848,
-        0.9137426900584795
+        0.9078947368421053
       ],
       "position_blend_phase": [
         0.6915204678362573,
-        0.9137426900584795
+        0.9078947368421053
       ],
-      "orientation_blend_duration_s": 2.7,
-      "position_blend_duration_s": 3.04,
+      "orientation_blend_duration_s": 2.62,
+      "position_blend_duration_s": 2.96,
       "orientation_error_at_landing_start_deg": 14.720322941980273,
       "position_region_distance_at_landing_start_m": 0.057375844018042695,
       "max_remaining_position_region_distance_at_landing_start_m": 0.057375844018042695,
-      "closest_hand_distance_at_release_m": 0.22102661059061043,
+      "closest_hand_distance_at_release_m": 0.21110973495235025,
       "minimum_hand_distance_m": 0.18879259793683256,
-      "remaining_xy_net_after_release_m": 0.0015264659456436414,
-      "remaining_xy_path_after_release_m": 0.01080792640536943,
-      "max_xy_excursion_after_release_m": 0.002602198556471433
+      "remaining_xy_net_after_release_m": 0.0018409117391548807,
+      "remaining_xy_path_after_release_m": 0.011392222953400716,
+      "max_xy_excursion_after_release_m": 0.0029023607324139326
     },
     "Traj5_fists_fps50.npz": {
       "fps": 50.0,
@@ -620,28 +620,28 @@
       "max_xy_excursion_frame": 1373,
       "max_xy_excursion_time_s": 27.46,
       "max_xy_excursion_from_landing_center_m": 0.17629976476708017,
-      "release_frame": 1859,
-      "release_time_s": 37.18,
-      "release_phase": 0.7197057684862563,
+      "release_frame": 1845,
+      "release_time_s": 36.9,
+      "release_phase": 0.7142857142857143,
       "release_found": true,
       "orientation_blend_phase": [
         0.5787843592721641,
-        0.7197057684862563
+        0.7142857142857143
       ],
       "position_blend_phase": [
         0.5691056910569106,
-        0.7197057684862563
+        0.7142857142857143
       ],
-      "orientation_blend_duration_s": 7.28,
-      "position_blend_duration_s": 7.78,
+      "orientation_blend_duration_s": 7.0,
+      "position_blend_duration_s": 7.5,
       "orientation_error_at_landing_start_deg": 14.908519684575468,
       "position_region_distance_at_landing_start_m": 0.058847421369085155,
       "max_remaining_position_region_distance_at_landing_start_m": 0.058847421369085155,
-      "closest_hand_distance_at_release_m": 0.22020270457734212,
+      "closest_hand_distance_at_release_m": 0.21012114244071722,
       "minimum_hand_distance_m": 0.1768605067342524,
-      "remaining_xy_net_after_release_m": 0.0002292737932824656,
-      "remaining_xy_path_after_release_m": 0.013774292919452293,
-      "max_xy_excursion_after_release_m": 0.0012475693177661706
+      "remaining_xy_net_after_release_m": 0.00014537289375428388,
+      "remaining_xy_path_after_release_m": 0.013987730317074249,
+      "max_xy_excursion_after_release_m": 0.001160642369591504
     },
     "Traj5_fists_fps60to50.npz": {
       "fps": 50.0,
@@ -662,28 +662,28 @@
       "max_xy_excursion_frame": 686,
       "max_xy_excursion_time_s": 13.72,
       "max_xy_excursion_from_landing_center_m": 0.1762868469976508,
-      "release_frame": 930,
-      "release_time_s": 18.6,
-      "release_phase": 0.7203718048024786,
+      "release_frame": 923,
+      "release_time_s": 18.46,
+      "release_phase": 0.7149496514329977,
       "release_found": true,
       "orientation_blend_phase": [
         0.5793958171959721,
-        0.7203718048024786
+        0.7149496514329977
       ],
       "position_blend_phase": [
         0.5693261037955074,
-        0.7203718048024786
+        0.7149496514329977
       ],
-      "orientation_blend_duration_s": 3.64,
-      "position_blend_duration_s": 3.9,
+      "orientation_blend_duration_s": 3.5,
+      "position_blend_duration_s": 3.76,
       "orientation_error_at_landing_start_deg": 14.739057998043474,
       "position_region_distance_at_landing_start_m": 0.058847421369085155,
       "max_remaining_position_region_distance_at_landing_start_m": 0.058847421369085155,
-      "closest_hand_distance_at_release_m": 0.22089914603364955,
+      "closest_hand_distance_at_release_m": 0.21087767144545616,
       "minimum_hand_distance_m": 0.1768605067342524,
-      "remaining_xy_net_after_release_m": 0.00024344253381738888,
-      "remaining_xy_path_after_release_m": 0.012137278673224011,
-      "max_xy_excursion_after_release_m": 0.001251434828036935
+      "remaining_xy_net_after_release_m": 0.00013503943083638793,
+      "remaining_xy_path_after_release_m": 0.012353386523116544,
+      "max_xy_excursion_after_release_m": 0.0011416711784439596
     },
     "Traj5_fists_symmetric_fps50.npz": {
       "fps": 50.0,
@@ -704,28 +704,28 @@
       "max_xy_excursion_frame": 1373,
       "max_xy_excursion_time_s": 27.46,
       "max_xy_excursion_from_landing_center_m": 0.17629976476708017,
-      "release_frame": 1859,
-      "release_time_s": 37.18,
-      "release_phase": 0.7197057684862563,
+      "release_frame": 1845,
+      "release_time_s": 36.9,
+      "release_phase": 0.7142857142857143,
       "release_found": true,
       "orientation_blend_phase": [
         0.5787843592721641,
-        0.7197057684862563
+        0.7142857142857143
       ],
       "position_blend_phase": [
         0.5691056910569106,
-        0.7197057684862563
+        0.7142857142857143
       ],
-      "orientation_blend_duration_s": 7.28,
-      "position_blend_duration_s": 7.78,
+      "orientation_blend_duration_s": 7.0,
+      "position_blend_duration_s": 7.5,
       "orientation_error_at_landing_start_deg": 14.908519684575468,
       "position_region_distance_at_landing_start_m": 0.058847421369085155,
       "max_remaining_position_region_distance_at_landing_start_m": 0.058847421369085155,
-      "closest_hand_distance_at_release_m": 0.22020270457734212,
+      "closest_hand_distance_at_release_m": 0.21012114244071722,
       "minimum_hand_distance_m": 0.1768605067342524,
-      "remaining_xy_net_after_release_m": 0.0002292737932824656,
-      "remaining_xy_path_after_release_m": 0.013774292919452293,
-      "max_xy_excursion_after_release_m": 0.0012475693177661706
+      "remaining_xy_net_after_release_m": 0.00014537289375428388,
+      "remaining_xy_path_after_release_m": 0.013987730317074249,
+      "max_xy_excursion_after_release_m": 0.001160642369591504
     },
     "Traj5_fists_symmetric_fps60to50.npz": {
       "fps": 50.0,
@@ -746,28 +746,28 @@
       "max_xy_excursion_frame": 686,
       "max_xy_excursion_time_s": 13.72,
       "max_xy_excursion_from_landing_center_m": 0.17628671672407972,
-      "release_frame": 930,
-      "release_time_s": 18.6,
-      "release_phase": 0.7203718048024786,
+      "release_frame": 923,
+      "release_time_s": 18.46,
+      "release_phase": 0.7149496514329977,
       "release_found": true,
       "orientation_blend_phase": [
         0.5793958171959721,
-        0.7203718048024786
+        0.7149496514329977
       ],
       "position_blend_phase": [
         0.5693261037955074,
-        0.7203718048024786
+        0.7149496514329977
       ],
-      "orientation_blend_duration_s": 3.64,
-      "position_blend_duration_s": 3.9,
+      "orientation_blend_duration_s": 3.5,
+      "position_blend_duration_s": 3.76,
       "orientation_error_at_landing_start_deg": 14.739068049949909,
       "position_region_distance_at_landing_start_m": 0.058847342577331686,
       "max_remaining_position_region_distance_at_landing_start_m": 0.058847342577331686,
-      "closest_hand_distance_at_release_m": 0.22089915218715808,
+      "closest_hand_distance_at_release_m": 0.21087757329360138,
       "minimum_hand_distance_m": 0.176860523062303,
-      "remaining_xy_net_after_release_m": 0.00024354513698046241,
-      "remaining_xy_path_after_release_m": 0.012135585457997282,
-      "max_xy_excursion_after_release_m": 0.0012515230164487803
+      "remaining_xy_net_after_release_m": 0.00013503045515610038,
+      "remaining_xy_path_after_release_m": 0.012351668337160247,
+      "max_xy_excursion_after_release_m": 0.0011416526938833522
     },
     "Traj6_fists_fps50.npz": {
       "fps": 50.0,
@@ -788,28 +788,28 @@
       "max_xy_excursion_frame": 1155,
       "max_xy_excursion_time_s": 23.1,
       "max_xy_excursion_from_landing_center_m": 0.13430976946538123,
-      "release_frame": 1500,
-      "release_time_s": 30.0,
-      "release_phase": 0.7032348804500703,
+      "release_frame": 1494,
+      "release_time_s": 29.88,
+      "release_phase": 0.70042194092827,
       "release_found": true,
       "orientation_blend_phase": [
         0.6155649320206282,
-        0.7032348804500703
+        0.70042194092827
       ],
       "position_blend_phase": [
         0.5729020159399906,
-        0.7032348804500703
+        0.70042194092827
       ],
-      "orientation_blend_duration_s": 3.74,
-      "position_blend_duration_s": 5.56,
+      "orientation_blend_duration_s": 3.62,
+      "position_blend_duration_s": 5.44,
       "orientation_error_at_landing_start_deg": 14.822250504764957,
       "position_region_distance_at_landing_start_m": 0.05941728147841962,
       "max_remaining_position_region_distance_at_landing_start_m": 0.05941728147841962,
-      "closest_hand_distance_at_release_m": 0.22086852008929225,
+      "closest_hand_distance_at_release_m": 0.21125259017359946,
       "minimum_hand_distance_m": 0.19183519322436976,
-      "remaining_xy_net_after_release_m": 0.0007577855918642514,
-      "remaining_xy_path_after_release_m": 0.030326375111418908,
-      "max_xy_excursion_after_release_m": 0.0017412349003224279
+      "remaining_xy_net_after_release_m": 0.0007021876238471975,
+      "remaining_xy_path_after_release_m": 0.030647042549120453,
+      "max_xy_excursion_after_release_m": 0.0016601333609742497
     },
     "Traj6_fists_fps60to50.npz": {
       "fps": 50.0,
@@ -830,28 +830,28 @@
       "max_xy_excursion_frame": 578,
       "max_xy_excursion_time_s": 11.56,
       "max_xy_excursion_from_landing_center_m": 0.13430593454892958,
-      "release_frame": 750,
-      "release_time_s": 15.0,
-      "release_phase": 0.7035647279549718,
+      "release_frame": 747,
+      "release_time_s": 14.94,
+      "release_phase": 0.700750469043152,
       "release_found": true,
       "orientation_blend_phase": [
         0.6163227016885553,
-        0.7035647279549718
+        0.700750469043152
       ],
       "position_blend_phase": [
         0.573170731707317,
-        0.7035647279549718
+        0.700750469043152
       ],
-      "orientation_blend_duration_s": 1.86,
-      "position_blend_duration_s": 2.78,
+      "orientation_blend_duration_s": 1.8,
+      "position_blend_duration_s": 2.72,
       "orientation_error_at_landing_start_deg": 14.302173616289366,
       "position_region_distance_at_landing_start_m": 0.05941728147841962,
       "max_remaining_position_region_distance_at_landing_start_m": 0.05941728147841962,
-      "closest_hand_distance_at_release_m": 0.22086852008929225,
+      "closest_hand_distance_at_release_m": 0.21125259017359946,
       "minimum_hand_distance_m": 0.19183519322436976,
-      "remaining_xy_net_after_release_m": 0.0007424253442425157,
-      "remaining_xy_path_after_release_m": 0.026936354568555927,
-      "max_xy_excursion_after_release_m": 0.0017105445846478389
+      "remaining_xy_net_after_release_m": 0.0006854801161440063,
+      "remaining_xy_path_after_release_m": 0.027104380704066608,
+      "max_xy_excursion_after_release_m": 0.0016279662287665066
     },
     "Traj6_fists_symmetric_fps50.npz": {
       "fps": 50.0,
@@ -872,28 +872,28 @@
       "max_xy_excursion_frame": 1155,
       "max_xy_excursion_time_s": 23.1,
       "max_xy_excursion_from_landing_center_m": 0.13430993180723785,
-      "release_frame": 1500,
-      "release_time_s": 30.0,
-      "release_phase": 0.7032348804500703,
+      "release_frame": 1494,
+      "release_time_s": 29.88,
+      "release_phase": 0.70042194092827,
       "release_found": true,
       "orientation_blend_phase": [
         0.6155649320206282,
-        0.7032348804500703
+        0.70042194092827
       ],
       "position_blend_phase": [
         0.5729020159399906,
-        0.7032348804500703
+        0.70042194092827
       ],
-      "orientation_blend_duration_s": 3.74,
-      "position_blend_duration_s": 5.56,
+      "orientation_blend_duration_s": 3.62,
+      "position_blend_duration_s": 5.44,
       "orientation_error_at_landing_start_deg": 14.822254898326298,
       "position_region_distance_at_landing_start_m": 0.05941735940244174,
       "max_remaining_position_region_distance_at_landing_start_m": 0.05941735940244174,
-      "closest_hand_distance_at_release_m": 0.2208685082241767,
+      "closest_hand_distance_at_release_m": 0.21125258909933067,
       "minimum_hand_distance_m": 0.19183514260175044,
-      "remaining_xy_net_after_release_m": 0.0007578112632977337,
-      "remaining_xy_path_after_release_m": 0.03032568746731963,
-      "max_xy_excursion_after_release_m": 0.0017413417362074904
+      "remaining_xy_net_after_release_m": 0.0007022226768820538,
+      "remaining_xy_path_after_release_m": 0.030646456985852586,
+      "max_xy_excursion_after_release_m": 0.001660251432550003
     },
     "Traj6_fists_symmetric_fps60to50.npz": {
       "fps": 50.0,
@@ -914,28 +914,28 @@
       "max_xy_excursion_frame": 578,
       "max_xy_excursion_time_s": 11.56,
       "max_xy_excursion_from_landing_center_m": 0.13430596131713493,
-      "release_frame": 750,
-      "release_time_s": 15.0,
-      "release_phase": 0.7035647279549718,
+      "release_frame": 747,
+      "release_time_s": 14.94,
+      "release_phase": 0.700750469043152,
       "release_found": true,
       "orientation_blend_phase": [
         0.6163227016885553,
-        0.7035647279549718
+        0.700750469043152
       ],
       "position_blend_phase": [
         0.573170731707317,
-        0.7035647279549718
+        0.700750469043152
       ],
-      "orientation_blend_duration_s": 1.86,
-      "position_blend_duration_s": 2.78,
+      "orientation_blend_duration_s": 1.8,
+      "position_blend_duration_s": 2.72,
       "orientation_error_at_landing_start_deg": 14.302164969174365,
       "position_region_distance_at_landing_start_m": 0.05941735940244174,
       "max_remaining_position_region_distance_at_landing_start_m": 0.05941735940244174,
-      "closest_hand_distance_at_release_m": 0.2208685082241767,
+      "closest_hand_distance_at_release_m": 0.21125258909933067,
       "minimum_hand_distance_m": 0.19183514260175044,
-      "remaining_xy_net_after_release_m": 0.0007424585521516489,
-      "remaining_xy_path_after_release_m": 0.02693626423760356,
-      "max_xy_excursion_after_release_m": 0.0017106697253925528
+      "remaining_xy_net_after_release_m": 0.0006855200244062493,
+      "remaining_xy_path_after_release_m": 0.027104163009760977,
+      "max_xy_excursion_after_release_m": 0.00162810177898373
     },
     "Traj7_fists_fps50.npz": {
       "fps": 50.0,
@@ -956,28 +956,28 @@
       "max_xy_excursion_frame": 893,
       "max_xy_excursion_time_s": 17.86,
       "max_xy_excursion_from_landing_center_m": 0.15017666654117115,
-      "release_frame": 2882,
-      "release_time_s": 57.64,
-      "release_phase": 0.8870421668205601,
+      "release_frame": 2878,
+      "release_time_s": 57.56,
+      "release_phase": 0.8858110187750077,
       "release_found": true,
       "orientation_blend_phase": [
         0.5589412126808249,
-        0.8870421668205601
+        0.8858110187750077
       ],
       "position_blend_phase": [
         0.7500769467528471,
-        0.8870421668205601
+        0.8858110187750077
       ],
-      "orientation_blend_duration_s": 21.32,
-      "position_blend_duration_s": 8.9,
+      "orientation_blend_duration_s": 21.24,
+      "position_blend_duration_s": 8.82,
       "orientation_error_at_landing_start_deg": 14.988221856246735,
       "position_region_distance_at_landing_start_m": 0.059884761728739085,
       "max_remaining_position_region_distance_at_landing_start_m": 0.059884761728739085,
-      "closest_hand_distance_at_release_m": 0.22095108523159138,
+      "closest_hand_distance_at_release_m": 0.2116823829922141,
       "minimum_hand_distance_m": 0.1902240902370405,
-      "remaining_xy_net_after_release_m": 7.916439874360961e-05,
-      "remaining_xy_path_after_release_m": 0.01240375362002435,
-      "max_xy_excursion_after_release_m": 0.0005448821499545661
+      "remaining_xy_net_after_release_m": 0.00017177360667514898,
+      "remaining_xy_path_after_release_m": 0.012512541939519777,
+      "max_xy_excursion_after_release_m": 0.0006298454943830195
     },
     "Traj7_fists_fps60to50.npz": {
       "fps": 50.0,
@@ -998,28 +998,28 @@
       "max_xy_excursion_frame": 447,
       "max_xy_excursion_time_s": 8.94,
       "max_xy_excursion_from_landing_center_m": 0.15017420785401803,
-      "release_frame": 1441,
-      "release_time_s": 28.82,
-      "release_phase": 0.8873152709359606,
+      "release_frame": 1439,
+      "release_time_s": 28.78,
+      "release_phase": 0.8860837438423645,
       "release_found": true,
       "orientation_blend_phase": [
         0.5591133004926109,
-        0.8873152709359606
+        0.8860837438423645
       ],
       "position_blend_phase": [
         0.750615763546798,
-        0.8873152709359606
+        0.8860837438423645
       ],
-      "orientation_blend_duration_s": 10.66,
-      "position_blend_duration_s": 4.44,
+      "orientation_blend_duration_s": 10.62,
+      "position_blend_duration_s": 4.4,
       "orientation_error_at_landing_start_deg": 14.965902168369782,
       "position_region_distance_at_landing_start_m": 0.059497143697462125,
       "max_remaining_position_region_distance_at_landing_start_m": 0.059497143697462125,
-      "closest_hand_distance_at_release_m": 0.22095108523159138,
+      "closest_hand_distance_at_release_m": 0.2116823829922141,
       "minimum_hand_distance_m": 0.1902240902370405,
-      "remaining_xy_net_after_release_m": 9.32428180570551e-06,
-      "remaining_xy_path_after_release_m": 0.009542943791853827,
-      "max_xy_excursion_after_release_m": 0.0005448821499545661
+      "remaining_xy_net_after_release_m": 9.42022701578412e-05,
+      "remaining_xy_path_after_release_m": 0.009649644652205785,
+      "max_xy_excursion_after_release_m": 0.0006298454943830195
     },
     "Traj7_fists_symmetric_fps50.npz": {
       "fps": 50.0,
@@ -1040,28 +1040,28 @@
       "max_xy_excursion_frame": 893,
       "max_xy_excursion_time_s": 17.86,
       "max_xy_excursion_from_landing_center_m": 0.15017671512988703,
-      "release_frame": 2882,
-      "release_time_s": 57.64,
-      "release_phase": 0.8870421668205601,
+      "release_frame": 2878,
+      "release_time_s": 57.56,
+      "release_phase": 0.8858110187750077,
       "release_found": true,
       "orientation_blend_phase": [
         0.5589412126808249,
-        0.8870421668205601
+        0.8858110187750077
       ],
       "position_blend_phase": [
         0.7500769467528471,
-        0.8870421668205601
+        0.8858110187750077
       ],
-      "orientation_blend_duration_s": 21.32,
-      "position_blend_duration_s": 8.9,
+      "orientation_blend_duration_s": 21.24,
+      "position_blend_duration_s": 8.82,
       "orientation_error_at_landing_start_deg": 14.988223784534068,
       "position_region_distance_at_landing_start_m": 0.05988465436958363,
       "max_remaining_position_region_distance_at_landing_start_m": 0.05988465436958363,
-      "closest_hand_distance_at_release_m": 0.22095112637366632,
+      "closest_hand_distance_at_release_m": 0.2116824595737757,
       "minimum_hand_distance_m": 0.19022408894395793,
-      "remaining_xy_net_after_release_m": 7.911707792773876e-05,
-      "remaining_xy_path_after_release_m": 0.012403022150190953,
-      "max_xy_excursion_after_release_m": 0.0005447927529863024
+      "remaining_xy_net_after_release_m": 0.00017162233522223793,
+      "remaining_xy_path_after_release_m": 0.012511754287505126,
+      "max_xy_excursion_after_release_m": 0.0006296705794131371
     },
     "Traj7_fists_symmetric_fps60to50.npz": {
       "fps": 50.0,
@@ -1082,28 +1082,28 @@
       "max_xy_excursion_frame": 447,
       "max_xy_excursion_time_s": 8.94,
       "max_xy_excursion_from_landing_center_m": 0.15017431097320916,
-      "release_frame": 1441,
-      "release_time_s": 28.82,
-      "release_phase": 0.8873152709359606,
+      "release_frame": 1439,
+      "release_time_s": 28.78,
+      "release_phase": 0.8860837438423645,
       "release_found": true,
       "orientation_blend_phase": [
         0.5591133004926109,
-        0.8873152709359606
+        0.8860837438423645
       ],
       "position_blend_phase": [
         0.750615763546798,
-        0.8873152709359606
+        0.8860837438423645
       ],
-      "orientation_blend_duration_s": 10.66,
-      "position_blend_duration_s": 4.44,
+      "orientation_blend_duration_s": 10.62,
+      "position_blend_duration_s": 4.4,
       "orientation_error_at_landing_start_deg": 14.965891530532472,
       "position_region_distance_at_landing_start_m": 0.05949710679992989,
       "max_remaining_position_region_distance_at_landing_start_m": 0.05949710679992989,
-      "closest_hand_distance_at_release_m": 0.22095112637366632,
+      "closest_hand_distance_at_release_m": 0.2116824595737757,
       "minimum_hand_distance_m": 0.19022408894395793,
-      "remaining_xy_net_after_release_m": 9.370366282025474e-06,
-      "remaining_xy_path_after_release_m": 0.009542866606478366,
-      "max_xy_excursion_after_release_m": 0.0005447927529863024
+      "remaining_xy_net_after_release_m": 9.418149234640147e-05,
+      "remaining_xy_path_after_release_m": 0.009649495515279253,
+      "max_xy_excursion_after_release_m": 0.0006296705794131371
     },
     "Traj8_fps50.npz": {
       "fps": 50.0,
@@ -1124,28 +1124,28 @@
       "max_xy_excursion_frame": 2395,
       "max_xy_excursion_time_s": 47.9,
       "max_xy_excursion_from_landing_center_m": 0.1587141198686445,
-      "release_frame": 2859,
-      "release_time_s": 57.18,
-      "release_phase": 0.8577857785778578,
+      "release_frame": 2851,
+      "release_time_s": 57.02,
+      "release_phase": 0.8553855385538554,
       "release_found": true,
       "orientation_blend_phase": [
         0.5868586858685868,
-        0.8577857785778578
+        0.8553855385538554
       ],
       "position_blend_phase": [
         0.7731773177317732,
-        0.8577857785778578
+        0.8553855385538554
       ],
-      "orientation_blend_duration_s": 18.06,
-      "position_blend_duration_s": 5.64,
+      "orientation_blend_duration_s": 17.9,
+      "position_blend_duration_s": 5.48,
       "orientation_error_at_landing_start_deg": 14.949019242895947,
       "position_region_distance_at_landing_start_m": 0.059454156909149576,
       "max_remaining_position_region_distance_at_landing_start_m": 0.059454156909149576,
-      "closest_hand_distance_at_release_m": 0.2210748789181474,
+      "closest_hand_distance_at_release_m": 0.21010808528325525,
       "minimum_hand_distance_m": 0.18143529182022441,
-      "remaining_xy_net_after_release_m": 0.0002513125012722251,
-      "remaining_xy_path_after_release_m": 0.007284904199715697,
-      "max_xy_excursion_after_release_m": 0.0003006959530046859
+      "remaining_xy_net_after_release_m": 0.00021992077133867094,
+      "remaining_xy_path_after_release_m": 0.007529572665842737,
+      "max_xy_excursion_after_release_m": 0.0002618192357840639
     },
     "Traj8_fps60to50.npz": {
       "fps": 50.0,
@@ -1166,28 +1166,28 @@
       "max_xy_excursion_frame": 1206,
       "max_xy_excursion_time_s": 24.12,
       "max_xy_excursion_from_landing_center_m": 0.15871141475755848,
-      "release_frame": 1430,
-      "release_time_s": 28.6,
-      "release_phase": 0.858343337334934,
+      "release_frame": 1426,
+      "release_time_s": 28.52,
+      "release_phase": 0.8559423769507803,
       "release_found": true,
       "orientation_blend_phase": [
         0.5870348139255702,
-        0.858343337334934
+        0.8559423769507803
       ],
       "position_blend_phase": [
         0.7737094837935174,
-        0.858343337334934
+        0.8559423769507803
       ],
-      "orientation_blend_duration_s": 9.04,
-      "position_blend_duration_s": 2.82,
+      "orientation_blend_duration_s": 8.96,
+      "position_blend_duration_s": 2.74,
       "orientation_error_at_landing_start_deg": 14.947738582832958,
       "position_region_distance_at_landing_start_m": 0.05867169321628322,
       "max_remaining_position_region_distance_at_landing_start_m": 0.05867169321628322,
-      "closest_hand_distance_at_release_m": 0.22271009899128255,
+      "closest_hand_distance_at_release_m": 0.2112295916429345,
       "minimum_hand_distance_m": 0.18143529182022441,
-      "remaining_xy_net_after_release_m": 0.0002467698812631981,
-      "remaining_xy_path_after_release_m": 0.005958700958303285,
-      "max_xy_excursion_after_release_m": 0.0002816831325256938
+      "remaining_xy_net_after_release_m": 0.00023017278461718297,
+      "remaining_xy_path_after_release_m": 0.006169559014099238,
+      "max_xy_excursion_after_release_m": 0.00026090272028688935
     },
     "Traj8_symmetric_fps50.npz": {
       "fps": 50.0,
@@ -1208,28 +1208,28 @@
       "max_xy_excursion_frame": 2395,
       "max_xy_excursion_time_s": 47.9,
       "max_xy_excursion_from_landing_center_m": 0.1587141198686445,
-      "release_frame": 2859,
-      "release_time_s": 57.18,
-      "release_phase": 0.8577857785778578,
+      "release_frame": 2851,
+      "release_time_s": 57.02,
+      "release_phase": 0.8553855385538554,
       "release_found": true,
       "orientation_blend_phase": [
         0.5868586858685868,
-        0.8577857785778578
+        0.8553855385538554
       ],
       "position_blend_phase": [
         0.7731773177317732,
-        0.8577857785778578
+        0.8553855385538554
       ],
-      "orientation_blend_duration_s": 18.06,
-      "position_blend_duration_s": 5.64,
+      "orientation_blend_duration_s": 17.9,
+      "position_blend_duration_s": 5.48,
       "orientation_error_at_landing_start_deg": 14.949019242895947,
       "position_region_distance_at_landing_start_m": 0.059454156909149576,
       "max_remaining_position_region_distance_at_landing_start_m": 0.059454156909149576,
-      "closest_hand_distance_at_release_m": 0.2210748789181474,
+      "closest_hand_distance_at_release_m": 0.21010808528325525,
       "minimum_hand_distance_m": 0.18143529182022441,
-      "remaining_xy_net_after_release_m": 0.0002513125012722251,
-      "remaining_xy_path_after_release_m": 0.007284904199715697,
-      "max_xy_excursion_after_release_m": 0.0003006959530046859
+      "remaining_xy_net_after_release_m": 0.00021992077133867094,
+      "remaining_xy_path_after_release_m": 0.007529572665842737,
+      "max_xy_excursion_after_release_m": 0.0002618192357840639
     },
     "Traj8_symmetric_fps60to50.npz": {
       "fps": 50.0,
@@ -1250,28 +1250,28 @@
       "max_xy_excursion_frame": 1206,
       "max_xy_excursion_time_s": 24.12,
       "max_xy_excursion_from_landing_center_m": 0.15871132330548746,
-      "release_frame": 1430,
-      "release_time_s": 28.6,
-      "release_phase": 0.858343337334934,
+      "release_frame": 1426,
+      "release_time_s": 28.52,
+      "release_phase": 0.8559423769507803,
       "release_found": true,
       "orientation_blend_phase": [
         0.5870348139255702,
-        0.858343337334934
+        0.8559423769507803
       ],
       "position_blend_phase": [
         0.7737094837935174,
-        0.858343337334934
+        0.8559423769507803
       ],
-      "orientation_blend_duration_s": 9.04,
-      "position_blend_duration_s": 2.82,
+      "orientation_blend_duration_s": 8.96,
+      "position_blend_duration_s": 2.74,
       "orientation_error_at_landing_start_deg": 14.94774451943016,
       "position_region_distance_at_landing_start_m": 0.05867151193625037,
       "max_remaining_position_region_distance_at_landing_start_m": 0.05867151193625037,
-      "closest_hand_distance_at_release_m": 0.22271017880935176,
+      "closest_hand_distance_at_release_m": 0.2112297000695283,
       "minimum_hand_distance_m": 0.18143533164453798,
-      "remaining_xy_net_after_release_m": 0.00024678920065538155,
-      "remaining_xy_path_after_release_m": 0.0059590013954899865,
-      "max_xy_excursion_after_release_m": 0.0002816217993997263
+      "remaining_xy_net_after_release_m": 0.0002301828147277453,
+      "remaining_xy_path_after_release_m": 0.0061698766601074005,
+      "max_xy_excursion_after_release_m": 0.00026085381533586823
     },
     "Traj9_fists_fps50.npz": {
       "fps": 50.0,
@@ -1292,28 +1292,28 @@
       "max_xy_excursion_frame": 1285,
       "max_xy_excursion_time_s": 25.7,
       "max_xy_excursion_from_landing_center_m": 0.07545318761629168,
-      "release_frame": 1474,
-      "release_time_s": 29.48,
-      "release_phase": 0.7562852744997435,
+      "release_frame": 1469,
+      "release_time_s": 29.38,
+      "release_phase": 0.7537198563365829,
       "release_found": true,
       "orientation_blend_phase": [
         0.6459722934838379,
-        0.7562852744997435
+        0.7537198563365829
       ],
       "position_blend_phase": [
         0.6593124679322729,
-        0.7562852744997435
+        0.7537198563365829
       ],
-      "orientation_blend_duration_s": 4.3,
-      "position_blend_duration_s": 3.78,
+      "orientation_blend_duration_s": 4.2,
+      "position_blend_duration_s": 3.68,
       "orientation_error_at_landing_start_deg": 14.824293097334513,
       "position_region_distance_at_landing_start_m": 0.050453187616291674,
       "max_remaining_position_region_distance_at_landing_start_m": 0.050453187616291674,
-      "closest_hand_distance_at_release_m": 0.22036028671267496,
+      "closest_hand_distance_at_release_m": 0.21068828152275587,
       "minimum_hand_distance_m": 0.1909003397460397,
-      "remaining_xy_net_after_release_m": 0.00022549244250315778,
-      "remaining_xy_path_after_release_m": 0.011586923784728849,
-      "max_xy_excursion_after_release_m": 0.000228684015630863
+      "remaining_xy_net_after_release_m": 0.00025958108204108583,
+      "remaining_xy_path_after_release_m": 0.011757266027817058,
+      "max_xy_excursion_after_release_m": 0.0002635361249698706
     },
     "Traj9_fists_fps60to50.npz": {
       "fps": 50.0,
@@ -1334,28 +1334,28 @@
       "max_xy_excursion_frame": 643,
       "max_xy_excursion_time_s": 12.86,
       "max_xy_excursion_from_landing_center_m": 0.07544896869025638,
-      "release_frame": 737,
-      "release_time_s": 14.74,
-      "release_phase": 0.7566735112936345,
+      "release_frame": 735,
+      "release_time_s": 14.7,
+      "release_phase": 0.7546201232032854,
       "release_found": true,
       "orientation_blend_phase": [
         0.6468172484599589,
-        0.7566735112936345
+        0.7546201232032854
       ],
       "position_blend_phase": [
         0.660164271047228,
-        0.7566735112936345
+        0.7546201232032854
       ],
-      "orientation_blend_duration_s": 2.14,
-      "position_blend_duration_s": 1.88,
+      "orientation_blend_duration_s": 2.1,
+      "position_blend_duration_s": 1.84,
       "orientation_error_at_landing_start_deg": 14.539655747334093,
       "position_region_distance_at_landing_start_m": 0.050448968690256384,
       "max_remaining_position_region_distance_at_landing_start_m": 0.050448968690256384,
-      "closest_hand_distance_at_release_m": 0.22036028671267496,
+      "closest_hand_distance_at_release_m": 0.21256401225917185,
       "minimum_hand_distance_m": 0.1909003397460397,
-      "remaining_xy_net_after_release_m": 0.00021878478183204715,
-      "remaining_xy_path_after_release_m": 0.009148305111711743,
-      "max_xy_excursion_after_release_m": 0.000228684015630863
+      "remaining_xy_net_after_release_m": 0.000270079241504558,
+      "remaining_xy_path_after_release_m": 0.009290156022808164,
+      "max_xy_excursion_after_release_m": 0.00028452463076745306
     },
     "Traj9_fists_symmetric_fps50.npz": {
       "fps": 50.0,
@@ -1376,28 +1376,28 @@
       "max_xy_excursion_frame": 1285,
       "max_xy_excursion_time_s": 25.7,
       "max_xy_excursion_from_landing_center_m": 0.07545314990149528,
-      "release_frame": 1474,
-      "release_time_s": 29.48,
-      "release_phase": 0.7562852744997435,
+      "release_frame": 1469,
+      "release_time_s": 29.38,
+      "release_phase": 0.7537198563365829,
       "release_found": true,
       "orientation_blend_phase": [
         0.6459722934838379,
-        0.7562852744997435
+        0.7537198563365829
       ],
       "position_blend_phase": [
         0.6593124679322729,
-        0.7562852744997435
+        0.7537198563365829
       ],
-      "orientation_blend_duration_s": 4.3,
-      "position_blend_duration_s": 3.78,
+      "orientation_blend_duration_s": 4.2,
+      "position_blend_duration_s": 3.68,
       "orientation_error_at_landing_start_deg": 14.824287162340235,
       "position_region_distance_at_landing_start_m": 0.05045314990149528,
       "max_remaining_position_region_distance_at_landing_start_m": 0.05045314990149528,
-      "closest_hand_distance_at_release_m": 0.2203602868361922,
+      "closest_hand_distance_at_release_m": 0.21068823475153364,
       "minimum_hand_distance_m": 0.19090034146226764,
-      "remaining_xy_net_after_release_m": 0.00022546750384222795,
-      "remaining_xy_path_after_release_m": 0.011587535881757514,
-      "max_xy_excursion_after_release_m": 0.0002286736610056413
+      "remaining_xy_net_after_release_m": 0.000259602390362593,
+      "remaining_xy_path_after_release_m": 0.01175786415500521,
+      "max_xy_excursion_after_release_m": 0.0002636869486528914
     },
     "Traj9_fists_symmetric_fps60to50.npz": {
       "fps": 50.0,
@@ -1418,28 +1418,28 @@
       "max_xy_excursion_frame": 643,
       "max_xy_excursion_time_s": 12.86,
       "max_xy_excursion_from_landing_center_m": 0.07544893476585446,
-      "release_frame": 737,
-      "release_time_s": 14.74,
-      "release_phase": 0.7566735112936345,
+      "release_frame": 735,
+      "release_time_s": 14.7,
+      "release_phase": 0.7546201232032854,
       "release_found": true,
       "orientation_blend_phase": [
         0.6468172484599589,
-        0.7566735112936345
+        0.7546201232032854
       ],
       "position_blend_phase": [
         0.660164271047228,
-        0.7566735112936345
+        0.7546201232032854
       ],
-      "orientation_blend_duration_s": 2.14,
-      "position_blend_duration_s": 1.88,
+      "orientation_blend_duration_s": 2.1,
+      "position_blend_duration_s": 1.84,
       "orientation_error_at_landing_start_deg": 14.539646214941747,
       "position_region_distance_at_landing_start_m": 0.05044893476585446,
       "max_remaining_position_region_distance_at_landing_start_m": 0.05044893476585446,
-      "closest_hand_distance_at_release_m": 0.2203602868361922,
+      "closest_hand_distance_at_release_m": 0.21256399789682906,
       "minimum_hand_distance_m": 0.19090034146226764,
-      "remaining_xy_net_after_release_m": 0.00021873657487572545,
-      "remaining_xy_path_after_release_m": 0.009147401487345636,
-      "max_xy_excursion_after_release_m": 0.0002286736610056413
+      "remaining_xy_net_after_release_m": 0.00027003194463991577,
+      "remaining_xy_path_after_release_m": 0.009289251879507984,
+      "max_xy_excursion_after_release_m": 0.0002845694537324224
     }
   }
 }

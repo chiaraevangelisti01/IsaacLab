@@ -688,7 +688,7 @@ def main():
     parser.add_argument(
         "--release_distance_m",
         type=float,
-        default=0.22,
+        default=0.21,
         help=(
             "Hands are considered released once the "
             "closest hand remains farther than this "
