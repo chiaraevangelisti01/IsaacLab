@@ -17,6 +17,12 @@ from .soft_dice_landing_aware_env_cfg import (
     SoftDiceLandingAwareEnvCfg,
 )
 
+from isaaclab.managers import EventTermCfg as EventTerm
+
+from . import mdp
+
+EVAL_DENSITY_VALUES_KG_M3 = (21.0, 23.0, 25.0, 27.0, 28.0)
+
 
 # ======================================================================
 # NO-PHASE OBSERVATION CONFIGURATION.
@@ -104,6 +110,15 @@ class SoftDiceLandingAwareEvalEnvCfg(
             self.scene.cube.spawn.physics_material
         )
 
+        self.events.randomize_cube_density = EventTerm(
+            func=mdp.set_evaluation_deformable_densities,
+            mode="prestartup",
+            params={
+                "density_values": EVAL_DENSITY_VALUES_KG_M3,
+                "nominal_density": float(cube_material.density),
+            },
+        )
+
         self.events.reset_to_reference.func = (
             reset_to_motion_start_with_robustness
         )
@@ -150,6 +165,7 @@ class SoftDiceLandingAwareEvalEnvCfg(
             "nominal_dynamic_friction": float(cube_material.dynamic_friction),
 
             "dynamic_friction_values": (0.70, 0.85, 1.00, 1.15, 1.30),
+            "density_values_kg_m3": EVAL_DENSITY_VALUES_KG_M3,
         }
 
         # --------------------------------------------------------------

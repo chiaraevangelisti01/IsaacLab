@@ -438,3 +438,102 @@ def randomize_deformable_material(
         poissons_ratio=poissons_ratio,
         dynamic_friction=dynamic_friction,
     )
+
+def _set_deformable_density_values(
+    env: ManagerBasedRLEnv,
+    env_ids: torch.Tensor,
+    densities: torch.Tensor,
+):
+    """Set explicit deformable density values before PhysX initialization."""
+
+    if env.sim.is_playing():
+        raise RuntimeError("Deformable density must be set before the simulation starts.")
+
+    env_ids = torch.as_tensor(env_ids, dtype=torch.long, device="cpu")
+    densities = torch.as_tensor(densities, dtype=torch.float32, device="cpu").reshape(-1)
+
+    if densities.numel() != env_ids.numel():
+        raise ValueError("Number of density values must match env_ids.")
+
+    if torch.any(densities <= 0.0):
+        raise ValueError("Density values must be positive.")
+
+    stage = env.sim.stage
+
+    for env_id, density in zip(env_ids.tolist(), densities.tolist()):
+        material_path = f"{env.scene.env_prim_paths[env_id]}/Cube/material"
+        material_prim = stage.GetPrimAtPath(material_path)
+
+        if not material_prim.IsValid():
+            raise RuntimeError(f"Cube material prim not found: {material_path}")
+
+        density_attr = material_prim.GetAttribute("omniphysics:density")
+
+        if not density_attr.IsValid():
+            raise RuntimeError(f"Density attribute not found on {material_path}")
+
+        density_attr.Set(float(density))
+
+
+def randomize_deformable_density(
+    env: ManagerBasedRLEnv,
+    env_ids: torch.Tensor | None,
+    density_range: tuple[float, float],
+):
+    """Randomize soft-dice density independently across environments."""
+
+    low, high = density_range
+
+    if low <= 0.0 or high < low:
+        raise ValueError(f"Invalid density range: {density_range}")
+
+    if env_ids is None:
+        env_ids = torch.arange(env.num_envs, dtype=torch.long, device="cpu")
+    else:
+        env_ids = torch.as_tensor(env_ids, dtype=torch.long, device="cpu")
+
+    densities = math_utils.sample_uniform(low, high, (env_ids.numel(),), device="cpu")
+
+    _set_deformable_density_values(env=env, env_ids=env_ids, densities=densities)
+
+def set_evaluation_deformable_densities(
+    env: ManagerBasedRLEnv,
+    env_ids: torch.Tensor | None,
+    density_values: tuple[float, ...],
+    nominal_density: float,
+):
+    """Assign fixed test densities to the first environments and nominal density to the rest."""
+
+    if nominal_density <= 0.0:
+        raise ValueError("nominal_density must be positive.")
+
+    if env_ids is None:
+        env_ids = torch.arange(env.num_envs, dtype=torch.long, device="cpu")
+    else:
+        env_ids = torch.as_tensor(env_ids, dtype=torch.long, device="cpu")
+
+    test_densities = torch.as_tensor(density_values, dtype=torch.float32, device="cpu")
+
+    if torch.any(test_densities <= 0.0):
+        raise ValueError("All evaluation densities must be positive.")
+
+    if test_densities.numel() > env.num_envs:
+        raise ValueError("Number of evaluation densities exceeds the number of environments.")
+
+    densities = torch.full((env.num_envs,), float(nominal_density), dtype=torch.float32, device="cpu")
+    densities[:test_densities.numel()] = test_densities
+
+    _set_deformable_density_values(env=env, env_ids=env_ids, densities=densities[env_ids])
+
+    # Store the fixed density assignment for evaluation/reset bookkeeping.
+    env._soft_dice_density_kg_m3 = densities.to(env.device)
+    env._soft_dice_density_test_mask = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+    env._soft_dice_density_test_mask[:test_densities.numel()] = True
+
+    for env_id in range(test_densities.numel()):
+        print(
+            f"[DENSITY SETUP] env={env_id} "
+            f"density={densities[env_id].item():.1f} kg/m^3"
+        )
+
+    

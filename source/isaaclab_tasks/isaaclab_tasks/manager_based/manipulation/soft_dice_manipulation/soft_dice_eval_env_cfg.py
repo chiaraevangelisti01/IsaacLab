@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 from isaaclab.utils.configclass import configclass
 
+from . import mdp
 from .soft_dice_env_cfg import SoftDiceTrackingEnvCfg
 from .evaluation.recorder import (
     SoftDiceEvaluationRecordersCfg,
@@ -10,7 +11,9 @@ from .evaluation.recorder import (
 from .evaluation.robustness import (
     reset_to_motion_start_with_robustness,
 )
+from isaaclab.managers import EventTermCfg as EventTerm
 
+EVAL_DENSITY_VALUES_KG_M3 = (21.0, 23.0, 25.0, 27.0, 28.0)
 
 @configclass
 class SoftDiceTrackingEvalEnvCfg(SoftDiceTrackingEnvCfg):
@@ -42,13 +45,20 @@ class SoftDiceTrackingEvalEnvCfg(SoftDiceTrackingEnvCfg):
         self.events.add_joint_default_pos = None
         self.events.base_com = None
         self.events.randomize_cube_material = None
-
         # --------------------------------------------------------------
         # Mixed nominal + robustness evaluation reset.
         # --------------------------------------------------------------
 
         cube_material = (
             self.scene.cube.spawn.physics_material
+        )
+        self.events.randomize_cube_density = EventTerm(
+            func=mdp.set_evaluation_deformable_densities,
+            mode="prestartup",
+            params={
+                "density_values": EVAL_DENSITY_VALUES_KG_M3,
+                "nominal_density": float(cube_material.density),
+            },
         )
 
         self.events.reset_to_reference.func = (
@@ -67,6 +77,7 @@ class SoftDiceTrackingEvalEnvCfg(SoftDiceTrackingEnvCfg):
             "nominal_poissons_ratio": float(cube_material.poissons_ratio),
             "nominal_dynamic_friction": float(cube_material.dynamic_friction),
             "dynamic_friction_values": (0.70, 0.85, 1.00, 1.15, 1.30),
+            "density_values_kg_m3": EVAL_DENSITY_VALUES_KG_M3,
         }
         # --------------------------------------------------------------
         # Do not define evaluation success through training termination

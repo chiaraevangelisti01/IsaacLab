@@ -64,19 +64,19 @@ def get_robustness_buffers(env) -> dict:
     )
 
     if "condition_id" not in buffers:
-        buffers["condition_id"] = torch.full(
-            (env.num_envs,),
-            -1,
-            dtype=torch.long,
-            device=env.device,
-        )
+        buffers["condition_id"] = torch.full((env.num_envs,),-1,dtype=torch.long,device=env.device)
 
     if "applied_perturbation" not in buffers:
-        buffers["applied_perturbation"] = torch.zeros(
-            env.num_envs,
-            dtype=torch.float32,
-            device=env.device,
-        )
+        buffers["applied_perturbation"] = torch.zeros(env.num_envs,dtype=torch.float32,device=env.device)
+
+    if "density_motion_cursor" not in buffers:
+        buffers["density_motion_cursor"] = torch.zeros(env.num_envs, dtype=torch.long, device=env.device)
+
+    if "density_test" not in buffers:
+        buffers["density_test"] = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+
+    if "cube_density_kg_m3" not in buffers:
+        buffers["cube_density_kg_m3"] = torch.full((env.num_envs,), float("nan"), dtype=torch.float32, device=env.device)
 
     return buffers
 
@@ -101,26 +101,15 @@ def reset_to_motion_start_with_robustness(
     command_name: str = "motion",
     robot_name: str = "robot",
     cube_name: str = "cube",
-    cube_xy_range_m: tuple[float, float] = (
-        -0.02,
-        0.02,
-    ),
-    cube_yaw_range_rad: tuple[float, float] = (
-        -0.1745329252,
-        0.1745329252,
-    ),
-    youngs_modulus_range_pa: tuple[float, float] = (
-        1.0e4,
-        1.6e4,
-    ),
-    poissons_ratio_range: tuple[float, float] = (
-        0.30,
-        0.40,
-    ),
+    cube_xy_range_m: tuple[float, float] = (-0.02, 0.02),
+    cube_yaw_range_rad: tuple[float, float] = (-0.1745329252, 0.1745329252),
+    youngs_modulus_range_pa: tuple[float, float] = (1.0e4, 1.6e4),
+    poissons_ratio_range: tuple[float, float] = (0.30, 0.40),
     nominal_youngs_modulus_pa: float = 1.5e4,
     nominal_poissons_ratio: float = 0.37,
     dynamic_friction_values: tuple[float, ...] = (0.70, 0.85, 1.00, 1.15, 1.30),
     nominal_dynamic_friction: float = 1.0,
+    density_values_kg_m3: tuple[float, ...] = (),
 ):
     """Reset with one balanced robustness condition per environment."""
 
@@ -134,8 +123,32 @@ def reset_to_motion_start_with_robustness(
 
     motion = env.command_manager.get_term(command_name)
     robustness = get_robustness_buffers(env)
-    # Select the reference motion first.
-    motion.sample_motions(env_ids)
+
+    num_density_envs = min(len(density_values_kg_m3), env.num_envs)
+
+    density_local_mask = env_ids < num_density_envs
+    density_env_ids = env_ids[density_local_mask]
+    regular_env_ids = env_ids[~density_local_mask]
+
+    robustness["density_test"][env_ids] = density_local_mask
+
+    if hasattr(env, "_soft_dice_density_kg_m3"):
+        robustness["cube_density_kg_m3"][env_ids] = env._soft_dice_density_kg_m3[env_ids]
+
+    if regular_env_ids.numel() > 0:
+        motion.sample_motions(regular_env_ids)
+
+    for env_id_tensor in density_env_ids:
+        env_id = int(env_id_tensor.item())
+        cursor = int(robustness["density_motion_cursor"][env_id].item())
+        motion_id = cursor % motion.num_motions
+
+        motion.set_motion_by_name(
+            motion.motion_name(motion_id),
+            env_ids=torch.tensor([env_id], dtype=torch.long, device=env.device),
+        )
+
+        robustness["density_motion_cursor"][env_id] += 1
     motion_ids = motion.motion_id[env_ids]
 
     num_conditions = len(ROBUSTNESS_CONDITIONS)
@@ -149,33 +162,26 @@ def reset_to_motion_start_with_robustness(
 
     condition_counts = robustness["condition_counts"]
 
-    condition_ids = torch.empty(
-    env_ids.numel(),
-    dtype=torch.long,
-    device=env.device,
-)
+    condition_ids = torch.full(
+        (env_ids.numel(),),
+        ROBUSTNESS_CONDITION_TO_ID["nominal"],
+        dtype=torch.long,
+        device=env.device,
+    )
 
     for motion_id in range(motion.num_motions):
         local_indices = torch.nonzero(
-            motion_ids == motion_id,
+            (motion_ids == motion_id) & (~density_local_mask),
             as_tuple=False,
         ).flatten()
 
         if local_indices.numel() == 0:
             continue
 
-        start_condition = torch.remainder(
-            condition_counts[motion_id].sum(),
-            num_conditions,
-        )
+        start_condition = torch.remainder(condition_counts[motion_id].sum(), num_conditions)
 
         assigned_conditions = torch.remainder(
-            torch.arange(
-                local_indices.numel(),
-                dtype=torch.long,
-                device=env.device,
-            )
-            + start_condition,
+            torch.arange(local_indices.numel(), dtype=torch.long, device=env.device) + start_condition,
             num_conditions,
         )
 
@@ -461,6 +467,8 @@ def initialize_robustness_terminal_buffers(
                 dtype=torch.float32,
                 device=env.device,
             ),
+            "density_test": torch.zeros(env.num_envs, dtype=torch.bool, device=env.device),
+            "cube_density_kg_m3": torch.full((env.num_envs,), float("nan"), dtype=torch.float32, device=env.device),
         }
     )
 
@@ -482,6 +490,8 @@ def snapshot_robustness_terminal(
     output["youngs_modulus_pa"][env_ids] = randomization["youngs_modulus_pa"][env_ids]
     output["poissons_ratio"][env_ids] = randomization["poissons_ratio"][env_ids]
     output["cube_dynamic_friction"][env_ids] = randomization["cube_dynamic_friction"][env_ids]
+    output["density_test"][env_ids] = robustness["density_test"][env_ids]
+    output["cube_density_kg_m3"][env_ids] = robustness["cube_density_kg_m3"][env_ids]
 
 
 def robustness_record_from_terminal(
@@ -518,8 +528,9 @@ def robustness_record_from_terminal(
         "youngs_modulus_pa": float(terminal["youngs_modulus_pa"][env_id].item()),
         "poissons_ratio": float(terminal["poissons_ratio"][env_id].item()),
         "cube_dynamic_friction": float(terminal["cube_dynamic_friction"][env_id].item()),
+        "density_test": bool(terminal["density_test"][env_id].item()),
+        "cube_density_kg_m3": float(terminal["cube_density_kg_m3"][env_id].item()),
     }
-
 
 def select_condition_records(
     records: list[dict],
@@ -531,8 +542,7 @@ def select_condition_records(
     selected_records = [
         record
         for record in records
-        if record["robustness_condition"]
-        == condition
+        if record["robustness_condition"] == condition and not record.get("density_test", False)
     ]
 
     episode_ids = {

@@ -68,7 +68,7 @@ def _records_for_condition(
     return [
         record
         for record in records
-        if record["robustness_condition"] == condition
+        if record["robustness_condition"] == condition and not record.get("density_test", False)
     ]
 
 
@@ -453,6 +453,161 @@ def _plot_dynamic_friction_control(records: list[dict]):
     fig.tight_layout()
     return fig
 
+def _plot_density_sensitivity(records: list[dict]):
+    """Plot task performance across fixed cube densities."""
+
+    density_records = [r for r in records if r.get("density_test", False)]
+
+    if not density_records:
+        return None
+
+    densities = np.asarray([r["cube_density_kg_m3"] for r in density_records], dtype=np.float64)
+    levels = np.unique(densities[np.isfinite(densities)])
+
+    if len(levels) == 0:
+        return None
+
+    landing_aware = "task_success" in density_records[0]
+
+    if landing_aware:
+        task_success = []
+        position_success = []
+        orientation_success = []
+        landing_error_cm = []
+
+        for level in levels:
+            group = [r for r in density_records if np.isclose(r["cube_density_kg_m3"], level)]
+            task_success.append(100.0 * np.mean([r["task_success"] for r in group]))
+            position_success.append(100.0 * np.mean([r["final_landing_position_success"] for r in group]))
+            orientation_success.append(100.0 * np.mean([r["final_landing_orientation_success"] for r in group]))
+            landing_error_cm.append(100.0 * np.mean([r["final_landing_xy_error_m"] for r in group]))
+
+        fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+
+        axes[0].plot(levels, task_success, marker="o", label="Task success")
+        axes[0].plot(levels, position_success, marker="o", label="Position success")
+        axes[0].plot(levels, orientation_success, marker="o", label="Orientation success")
+        axes[0].set_xlabel("Cube density [kg/m³]")
+        axes[0].set_ylabel("Success rate [%]")
+        axes[0].set_ylim(0.0, 100.0)
+        axes[0].set_title("Success vs cube density")
+        axes[0].legend()
+
+        axes[1].plot(levels, landing_error_cm, marker="o")
+        axes[1].set_xlabel("Cube density [kg/m³]")
+        axes[1].set_ylabel("Landing XY error [cm]")
+        axes[1].set_title("Landing error vs cube density")
+
+    else:
+        final_xy_error_cm = []
+
+        for level in levels:
+            group = [r for r in density_records if np.isclose(r["cube_density_kg_m3"], level)]
+            final_xy_error_cm.append(100.0 * np.mean([r["final_xy_position_error_m"] for r in group]))
+
+        fig, ax = plt.subplots(figsize=(7, 5))
+        ax.plot(levels, final_xy_error_cm, marker="o")
+        ax.set_xlabel("Cube density [kg/m³]")
+        ax.set_ylabel("Final XY error [cm]")
+        ax.set_title("Final XY error vs cube density")
+
+    fig.tight_layout()
+    return fig
+
+def _plot_density_control(records: list[dict]):
+    """Plot deformation and control effort across cube densities."""
+
+    density_records = [r for r in records if r.get("density_test", False)]
+
+    if not density_records:
+        return None
+
+    densities = np.asarray([r["cube_density_kg_m3"] for r in density_records], dtype=np.float64)
+    levels = np.unique(densities[np.isfinite(densities)])
+
+    if len(levels) == 0:
+        return None
+
+    deformation_mm = []
+    torque_nm = []
+    action_delta = []
+
+    for level in levels:
+        group = [r for r in density_records if np.isclose(r["cube_density_kg_m3"], level)]
+
+        deformation_mm.append(1000.0 * np.mean([r["deformation_rms_mean_m"] for r in group]))
+        torque_nm.append(np.mean([r["torque_rms_overall_nm"] for r in group]))
+        action_delta.append(np.mean([r["action_delta_rms_overall"] for r in group]))
+
+    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+
+    axes[0].plot(levels, deformation_mm, marker="o")
+    axes[0].set_xlabel("Cube density [kg/m³]")
+    axes[0].set_ylabel("Mean RMS deformation [mm]")
+    axes[0].set_title("Deformation")
+
+    axes[1].plot(levels, torque_nm, marker="o")
+    axes[1].set_xlabel("Cube density [kg/m³]")
+    axes[1].set_ylabel("Torque RMS [Nm]")
+    axes[1].set_title("Control effort")
+
+    axes[2].plot(levels, action_delta, marker="o")
+    axes[2].set_xlabel("Cube density [kg/m³]")
+    axes[2].set_ylabel("Action-delta RMS")
+    axes[2].set_title("Action smoothness")
+
+    fig.suptitle("Control sensitivity to cube density")
+    fig.tight_layout()
+    return fig
+
+def _plot_density_final_xy_scatter(records: list[dict]):
+    """Plot terminal cube placement for density-test episodes."""
+
+    density_records = [r for r in records if r.get("density_test", False)]
+    nominal_records = [
+        r for r in records
+        if r["robustness_condition"] == "nominal" and not r.get("density_test", False)
+    ]
+
+    if not density_records:
+        return None
+
+    x_cm = 100.0 * np.asarray([r["final_x_error_m"] for r in density_records], dtype=np.float64)
+    y_cm = 100.0 * np.asarray([r["final_y_error_m"] for r in density_records], dtype=np.float64)
+    densities = np.asarray([r["cube_density_kg_m3"] for r in density_records], dtype=np.float64)
+
+    nominal_x_cm = 100.0 * np.asarray([r["final_x_error_m"] for r in nominal_records], dtype=np.float64)
+    nominal_y_cm = 100.0 * np.asarray([r["final_y_error_m"] for r in nominal_records], dtype=np.float64)
+
+    fig, ax = plt.subplots(figsize=(7, 6))
+
+    if nominal_records:
+        ax.scatter(nominal_x_cm, nominal_y_cm, alpha=0.25, label="Nominal")
+
+    scatter = ax.scatter(x_cm, y_cm, c=densities, label="Density test")
+
+    ax.axhline(0.0, linewidth=0.8, linestyle="--")
+    ax.axvline(0.0, linewidth=0.8, linestyle="--")
+
+    all_x = np.concatenate((x_cm, nominal_x_cm))
+    all_y = np.concatenate((y_cm, nominal_y_cm))
+    limit = max(np.max(np.abs(all_x)), np.max(np.abs(all_y)), 0.1) * 1.15
+
+    ax.set_xlim(-limit, limit)
+    ax.set_ylim(-limit, limit)
+    ax.set_aspect("equal", adjustable="box")
+
+    ax.set_xlabel("Final X error [cm]")
+    ax.set_ylabel("Final Y error [cm]")
+    ax.set_title("Final cube placement — density")
+
+    colorbar = fig.colorbar(scatter, ax=ax)
+    colorbar.set_label("Cube density [kg/m³]")
+
+    ax.legend()
+    fig.tight_layout()
+    return fig
+
 # -----------------------------------------------------------------------------
 # Public logging entry point.
 # -----------------------------------------------------------------------------
@@ -554,3 +709,30 @@ def log_robustness_visualizations(
         plt.close(
             deformation_fig
         )
+
+    density_final_xy_fig = _plot_density_final_xy_scatter(records)
+    density_sensitivity_fig = _plot_density_sensitivity(records)
+    density_control_fig = _plot_density_control(records)
+
+    density_logs = {}
+
+    if density_final_xy_fig is not None:
+        density_logs["robustness/density/final_xy"] = wandb.Image(density_final_xy_fig)
+
+    if density_sensitivity_fig is not None:
+        density_logs["robustness/density/sensitivity"] = wandb.Image(density_sensitivity_fig)
+
+    if density_control_fig is not None:
+        density_logs["robustness/density/control_sensitivity"] = wandb.Image(density_control_fig)
+
+    if density_logs:
+        run.log(density_logs)
+
+    if density_final_xy_fig is not None:
+        plt.close(density_final_xy_fig)
+
+    if density_sensitivity_fig is not None:
+        plt.close(density_sensitivity_fig)
+
+    if density_control_fig is not None:
+        plt.close(density_control_fig)

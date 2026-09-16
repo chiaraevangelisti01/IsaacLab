@@ -366,11 +366,11 @@ def main():
         }
 
 
-    total_target_episodes = sum(target_episodes_per_motion.values())
+    regular_target_episodes = sum(target_episodes_per_motion.values())
 
     print(
         f"[INFO] Evaluating {len(motion_paths)} motions, "
-        f"{total_target_episodes} total accepted episodes."
+        f"{regular_target_episodes} regular robustness episodes."
     )
 
     for path in motion_paths:
@@ -382,6 +382,26 @@ def main():
 
     env_cfg = load_cfg_from_registry(args_cli.task, "env_cfg_entry_point")
     agent_cfg = load_cfg_from_registry(args_cli.task, "rsl_rl_cfg_entry_point")
+
+    density_values_kg_m3 = tuple(
+        env_cfg.events.reset_to_reference.params.get("density_values_kg_m3", ())
+    )
+
+    num_density_envs = len(density_values_kg_m3)
+    density_target_episodes = num_density_envs * len(motion_paths)
+    total_target_episodes = regular_target_episodes + density_target_episodes
+
+    if args_cli.num_envs <= num_density_envs:
+        raise ValueError(
+            f"--num_envs must be greater than {num_density_envs}: "
+            f"the first {num_density_envs} environments are reserved for density evaluation."
+        )
+
+    print(
+        f"[INFO] Density robustness: {num_density_envs} densities x "
+        f"{len(motion_paths)} motions = {density_target_episodes} episodes."
+    )
+    print(f"[INFO] Total accepted episodes: {total_target_episodes}.")
 
     installed_version = metadata.version("rsl-rl-lib")
     agent_cfg = handle_deprecated_rsl_rl_cfg(agent_cfg, installed_version)
@@ -434,7 +454,7 @@ def main():
 
     # Resolve trajectory-dependent scene geometry.
     env_cfg.validate_config()
-
+    
     # Get landing region information from the registered task
     landing_position_cfg = getattr(env_cfg.rewards, "landing_position", None)
 
@@ -484,6 +504,9 @@ def main():
         "motion_pattern": args_cli.motion_pattern if args_cli.motion_dir is not None else None,
         "num_episodes": total_target_episodes,
         "target_episodes_per_motion": target_episodes_per_motion,
+        "density_values_kg_m3": list(density_values_kg_m3),
+        "num_density_envs": num_density_envs,
+        "density_target_episodes": density_target_episodes,
         "seed": int(args_cli.seed),
         "deterministic": bool(args_cli.deterministic),
         "git_commit": get_git_commit(),
@@ -530,7 +553,7 @@ def main():
     env = gym.make(args_cli.task, cfg=env_cfg)
     env = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
 
-    print(f"[INFO] Loading checkpoint: {resume_path}")
+  
 
     # -------------------------------------------------------------------------
     # Policy.
@@ -558,6 +581,7 @@ def main():
         configure_seed(env_cfg.seed, True)
 
     runner.load(resume_path)
+    print(f"[INFO] Loading checkpoint: {resume_path}")
 
     policy = runner.get_inference_policy(device=env.unwrapped.device)
 
@@ -614,6 +638,7 @@ def main():
     records: list[dict] = []
     trajectory_records: list[dict] = []
     accepted_episodes_per_motion = {name: 0 for name in target_episodes_per_motion}
+    accepted_density_pairs: set[tuple[float, str]] = set()
 
     try:
         while simulation_app.is_running() and len(records) < total_target_episodes:
@@ -664,8 +689,17 @@ def main():
                     if motion_name not in target_episodes_per_motion:
                         raise RuntimeError(f"Unexpected motion in evaluation: {motion_name}")
 
-                    if accepted_episodes_per_motion[motion_name] >= target_episodes_per_motion[motion_name]:
-                        continue
+                    is_density_test = bool(terminal["density_test"][env_id].item())
+                    cube_density = float(terminal["cube_density_kg_m3"][env_id].item())
+
+                    if is_density_test:
+                        density_pair = (cube_density, motion_name)
+
+                        if density_pair in accepted_density_pairs:
+                            continue
+                    else:
+                        if accepted_episodes_per_motion[motion_name] >= target_episodes_per_motion[motion_name]:
+                            continue
 
                     record = {
                         "episode_id": len(records),
@@ -681,14 +715,23 @@ def main():
                     }
 
                     records.append(record)
-                    accepted_episodes_per_motion[motion_name] += 1
 
-                    print(
-                        f"[EVAL] episode={record['episode_id']} motion={motion_name} "
-                        f"count={accepted_episodes_per_motion[motion_name]}/{target_episodes_per_motion[motion_name]} "
-                        f"env={env_id} steps={steps} termination={termination}"
-                    )
+                    if is_density_test:
+                        accepted_density_pairs.add(density_pair)
 
+                        print(
+                            f"[DENSITY EVAL] episode={record['episode_id']} density={cube_density:.1f} "
+                            f"motion={motion_name} count={len(accepted_density_pairs)}/{density_target_episodes} "
+                            f"env={env_id} steps={steps} termination={termination}"
+                        )
+                    else:
+                        accepted_episodes_per_motion[motion_name] += 1
+
+                        print(
+                            f"[EVAL] episode={record['episode_id']} motion={motion_name} "
+                            f"count={accepted_episodes_per_motion[motion_name]}/{target_episodes_per_motion[motion_name]} "
+                            f"env={env_id} steps={steps} termination={termination}"
+                        )
                     if not bool(terminal["terminal_valid"][env_id].item()):
                         raise RuntimeError(
                             f"Missing terminal snapshot for env {env_id}."
@@ -992,9 +1035,11 @@ def main():
         expected_per_condition = target_count // num_conditions
 
         for condition in ROBUSTNESS_CONDITIONS:
+
             actual_count = sum(
                 record["motion_name"] == motion_name
                 and record["robustness_condition"] == condition
+                and not record.get("density_test", False)
                 for record in records
             )
 
@@ -1004,6 +1049,21 @@ def main():
                     f"condition={condition}: expected "
                     f"{expected_per_condition}, got {actual_count}."
                 )
+
+        for density in density_values_kg_m3:
+            for motion_name in target_episodes_per_motion:
+                actual_count = sum(
+                    record.get("density_test", False)
+                    and record["motion_name"] == motion_name
+                    and abs(record["cube_density_kg_m3"] - density) < 1.0e-6
+                    for record in records
+                )
+
+                if actual_count != 1:
+                    raise RuntimeError(
+                        f"Unbalanced density evaluation: density={density}, "
+                        f"motion={motion_name}, expected 1 episode, got {actual_count}."
+                    )
         
     nominal_records, nominal_trajectory_records = (
         select_condition_records(
@@ -1029,6 +1089,7 @@ def main():
         "std_duration_s": statistics.pstdev(nominal_durations) if len(nominal_durations) > 1 else 0.0,
     }
 
+    summary["num_density_episodes"] = sum(record.get("density_test", False) for record in records)
     summary.update(compute_main_metric_summary(nominal_records))
     per_motion_summary = compute_per_motion_metric_summary(nominal_records)
 
