@@ -71,7 +71,7 @@ def make_deformable_cube_cfg(
             ),
 
             physics_material=PhysxDeformableBodyMaterialCfg(
-                density=21.5,
+                density=27.0,
                 poissons_ratio=0.37,
                 youngs_modulus=1.5e4,
                 static_friction=1.4,
@@ -400,16 +400,16 @@ class EventCfg:
         },
     )
 
-    # randomize_cube_density = EventTerm(
-    #     func=mdp.randomize_deformable_density,
-    #     mode="prestartup",
-    #     params={
-    #         "density_range": (
-    #             21.0,
-    #             28.0,
-    #         ),
-    #     },
-    # )
+    randomize_cube_density = EventTerm(
+        func=mdp.randomize_deformable_density,
+        mode="prestartup",
+        params={
+            "density_range": (
+                21.0,
+                28.0,
+            ),
+        },
+    )
         # --------------------------------------------------------------
     # Episode reset.
     # --------------------------------------------------------------

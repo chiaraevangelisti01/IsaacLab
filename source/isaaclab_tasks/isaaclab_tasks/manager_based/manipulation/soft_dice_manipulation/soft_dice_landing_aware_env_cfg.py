@@ -35,10 +35,10 @@ class LandingAwarePolicyCfg(
         params={
             "command_name": "motion",
         },
-        # noise=Unoise(
-        #     n_min=-0.005,
-        #     n_max=0.005,
-        # ),
+        noise=Unoise(
+            n_min=-0.005,
+            n_max=0.005,
+        ),
     )
 
     # Explicit task/motion phase information:
