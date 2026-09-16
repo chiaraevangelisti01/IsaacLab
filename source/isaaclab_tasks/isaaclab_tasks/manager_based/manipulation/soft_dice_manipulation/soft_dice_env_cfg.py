@@ -33,6 +33,8 @@ DEFAULT_CUBE_SIZE = 0.31
 DEFAULT_TABLE_LENGTH = 0.80
 DEFAULT_TABLE_WIDTH = 1.20
 DEFAULT_GROUND_Z = 0.0
+# Table top height used by the original multi-motion training environment.
+DEFAULT_TABLE_TOP_Z = 1.0251972675323486
 
 H1_TRACKING_JOINT_NAMES = [
     "torso",
@@ -52,21 +54,6 @@ H1_TRACKING_ACTION_SCALE = build_joint_action_scale(
     scale_factor=0.25,
 )
 
-# Experimental action-scale override for low-torque H1 joints.
-# Keep the physical actuator gains/limits unchanged; only modify the
-# mapping from normalized policy action to joint-position target.
-# H1_TRACKING_ACTION_SCALE.update(
-#     {
-#         "left_shoulder_pitch": 0.18,
-#         "left_shoulder_roll": 0.18,
-#         "left_shoulder_yaw": 0.18,
-#         "left_elbow": 0.18,
-#         "right_shoulder_pitch": 0.18,
-#         "right_shoulder_roll": 0.18,
-#         "right_shoulder_yaw": 0.18,
-#         "right_elbow": 0.18,
-#     }
-# )
 
 
 def make_deformable_cube_cfg(
@@ -413,7 +400,17 @@ class EventCfg:
         },
     )
 
-    # --------------------------------------------------------------
+    # randomize_cube_density = EventTerm(
+    #     func=mdp.randomize_deformable_density,
+    #     mode="prestartup",
+    #     params={
+    #         "density_range": (
+    #             21.0,
+    #             28.0,
+    #         ),
+    #     },
+    # )
+        # --------------------------------------------------------------
     # Episode reset.
     # --------------------------------------------------------------
 
@@ -725,17 +722,33 @@ class SoftDiceTrackingEnvCfg(ManagerBasedRLEnvCfg):
         cube_pos = np.asarray(initial_cube_positions[0], dtype=np.float32)
         self.scene.cube.init_state.pos = cube_pos.tolist()
 
-        cube_height = float(self.cube_size) * float(CUSTOM_DICE_SCALE[2])
-        cube_bottom_z = float(cube_pos[2] - cube_height / 2.0)
-        table_thickness = cube_bottom_z - float(self.ground_z)
+        table_top_z = float(DEFAULT_TABLE_TOP_Z)
+
+        table_thickness = (
+            table_top_z
+            - float(self.ground_z)
+        )
 
         if table_thickness <= 0.0:
-            raise ValueError(f"Computed table thickness is not positive: {table_thickness}")
+            raise ValueError(
+                f"Computed table thickness is not positive: "
+                f"{table_thickness}"
+            )
 
-        table_pos = np.asarray(self.scene.table.init_state.pos, dtype=np.float32)
+        table_pos = np.asarray(
+            self.scene.table.init_state.pos,
+            dtype=np.float32,
+        )
+
+        # For this test, keep x/y derived from the selected motion.
+        # Only z / table height is fixed.
         table_pos[0] = cube_pos[0] - 0.25
         table_pos[1] = cube_pos[1]
-        table_pos[2] = float(self.ground_z) + table_thickness / 2.0
+
+        table_pos[2] = (
+            float(self.ground_z)
+            + table_thickness / 2.0
+        )
 
         self.scene.table.init_state.pos = table_pos.tolist()
         self.scene.table.spawn.size = (
@@ -748,6 +761,4 @@ class SoftDiceTrackingEnvCfg(ManagerBasedRLEnvCfg):
         self.episode_length_s = max(max_duration + step_dt, step_dt)
 
     def validate_config(self):
-        # Isaac Lab 3 beta2 invokes this after Hydra overrides are applied.
-        # This is why env.commands.motion.motion_file=... can also drive the dependent scene layout.
         self.configure_from_motion()
