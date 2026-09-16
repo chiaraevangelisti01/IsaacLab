@@ -7,6 +7,7 @@ from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.managers import RewardTermCfg as RewTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils.configclass import configclass
+from isaaclab.utils.noise import UniformNoiseCfg as Unoise
 
 from . import mdp
 from .soft_dice_env_cfg import (
@@ -34,6 +35,10 @@ class LandingAwarePolicyCfg(
         params={
             "command_name": "motion",
         },
+        # noise=Unoise(
+        #     n_min=-0.005,
+        #     n_max=0.005,
+        # ),
     )
 
     # Explicit task/motion phase information:
