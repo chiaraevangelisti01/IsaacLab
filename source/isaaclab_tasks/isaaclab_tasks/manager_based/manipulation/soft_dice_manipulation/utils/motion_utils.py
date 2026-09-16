@@ -816,16 +816,34 @@ def load_trajectory_phase_metadata(
         # Release must have been detected.
         # ----------------------------------------------------------
 
-        if not bool(
+        release_found = bool(
             entry.get(
                 "release_found",
                 False,
             )
-        ):
-            raise ValueError(
-                f"{key}: preprocessing did "
-                "not successfully detect a "
-                "release."
+        )
+
+        if not release_found:
+            fallback_release = float(
+                entry.get(
+                    "release_phase",
+                    -1.0,
+                )
+            )
+
+            if not np.isclose(
+                fallback_release,
+                1.0,
+            ):
+                raise ValueError(
+                    f"{key}: no release was detected, "
+                    "but the fallback release phase "
+                    f"is {fallback_release}, expected 1.0."
+                )
+
+            print(
+                f"[WARN] {key}: no release detected; "
+                "using trajectory end as release."
             )
 
         # ----------------------------------------------------------
