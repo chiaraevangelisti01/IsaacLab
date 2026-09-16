@@ -676,7 +676,7 @@ def main():
     parser.add_argument(
         "--position_region_tolerance_m",
         type=float,
-        default=0.025,
+        default=0.05,
         help=(
             "Maximum allowed distance OUTSIDE the valid "
             "landing disk for position landing detection. "
