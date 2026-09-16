@@ -36,6 +36,7 @@ from ..utils.motion_utils import (
 )
 
 from ..utils.deformable_utils import  estimate_deformable_rigid_transform_kabsch
+from ..utils.geometry_utils import cube_semantic_surface_mappings
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
@@ -180,6 +181,16 @@ class MotionCommand(CommandTerm):
         self._cached_cube_rotation = None
         self._cached_cube_quat = None
         self._cached_cube_transform_step = -1
+
+        # Semantic dice-face assignment.
+        self._semantic_surface_to_face_slot = torch.tensor(
+            [2, 4, 1, 3, 0, 5],
+            dtype=torch.long,
+            device=self.device,
+        ).unsqueeze(0).expand(
+            self.num_envs,
+            -1,
+        ).clone()
 
         # -------------------------------------------------------------------------
         # Episode tracking metrics
@@ -740,6 +751,21 @@ class MotionCommand(CommandTerm):
             - self._env.scene.env_origins[:, None, :]
         )
 
+    @property
+    def semantic_surface_to_face_slot(
+        self,
+    ) -> torch.Tensor:
+        """Current semantic face assignment for every environment.
+        Shape:
+            (num_envs, 6)
+
+        Direction:
+            geometric surface index -> semantic numbered-face slot.
+        """
+
+        return self._semantic_surface_to_face_slot
+
+
 
     @property
     def robot_body_quat(self) -> torch.Tensor:
@@ -903,6 +929,32 @@ class MotionCommand(CommandTerm):
     def _start_global_idx(self, env_ids: torch.Tensor) -> torch.Tensor:
         motion_ids = self._motion_id[env_ids]
         return self._motion_offsets[motion_ids] + self._start_frames[motion_ids]
+    
+    def sample_semantic_face_mappings(
+        self,
+        env_ids: torch.Tensor,
+    ) -> None:
+        """Sample one valid numbered-cube orientation per environment."""
+
+        if env_ids.numel() == 0:
+            return
+
+        mappings = cube_semantic_surface_mappings(
+            device=self.device,
+        )
+
+        mapping_ids = torch.randint(
+            low=0,
+            high=mappings.shape[0],
+            size=(env_ids.numel(),),
+            device=self.device,
+        )
+
+        self._semantic_surface_to_face_slot[
+            env_ids
+        ] = mappings[
+            mapping_ids
+        ]
 
     def sample_motions(
         self,

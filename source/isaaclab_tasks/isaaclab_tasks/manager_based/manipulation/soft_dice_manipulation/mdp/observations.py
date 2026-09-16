@@ -11,8 +11,17 @@ from isaaclab.utils.math import (
     subtract_frame_transforms,
 )
 
-from ..utils.motion_utils import H1_TRACKED_BODY_NAMES
-from ..utils.geometry_utils import position_in_frame
+from ..utils.motion_utils import (
+    H1_TRACKED_BODY_NAMES,
+    H1_D435_RGB_POSITION_TORSO,
+)
+
+from ..utils.geometry_utils import (
+    position_in_frame,
+    compute_cube_topness_visibility_state,
+    map_surface_topness_to_semantic_faces,
+)
+
 from ..utils.reward_utils import smooth_phase_blend
 
 if TYPE_CHECKING:
@@ -320,4 +329,76 @@ def task_phase_observation(
             orientation_blend,
         ),
         dim=-1,
+    )
+
+def object_topness_visibility_state(
+    env: ManagerBasedRLEnv,
+    command_name: str = "motion",
+    topness_eps: float = 1.0e-1,
+    camera_eps: float = 1.0e-3,
+) -> dict[str, torch.Tensor]:
+
+    motion: MotionCommand = (
+        env.command_manager.get_term(
+            command_name
+        )
+    )
+
+    torso_idx = H1_TRACKED_BODY_NAMES.index(
+        "torso_link"
+    )
+
+    return compute_cube_topness_visibility_state(
+        cube_rotation=motion.simulator_cube_rotation,
+        cube_position=motion.simulator_cube_pos,
+        torso_position=motion.robot_body_pos[:, torso_idx, :],
+        torso_orientation=motion.robot_body_quat[:, torso_idx, :],
+        camera_offset_torso=H1_D435_RGB_POSITION_TORSO,
+        topness_eps=topness_eps,
+        camera_eps=camera_eps,
+    )
+
+def object_semantic_topness(
+    env: ManagerBasedRLEnv,
+    command_name: str = "motion",
+    topness_eps: float = 1.0e-1,
+    camera_eps: float = 1.0e-3,
+    missing_value: float = -1.0,
+) -> torch.Tensor:
+    """Vision-inspired semantic dice-face topness observation.
+
+    Returns:
+        Tensor with shape (num_envs, 6), ordered as:
+
+            [face1, face2, face3, face4, face5, face6]
+
+        Faces that are not both upward-facing and camera-facing
+        are assigned ``missing_value``.
+    """
+
+    motion: MotionCommand = (
+        env.command_manager.get_term(
+            command_name
+        )
+    )
+
+    torso_idx = H1_TRACKED_BODY_NAMES.index(
+        "torso_link"
+    )
+
+    state = compute_cube_topness_visibility_state(
+        cube_rotation=motion.simulator_cube_rotation,
+        cube_position=motion.simulator_cube_pos,
+        torso_position=motion.robot_body_pos[:, torso_idx, :],
+        torso_orientation=motion.robot_body_quat[:, torso_idx, :],
+        camera_offset_torso=H1_D435_RGB_POSITION_TORSO,
+        topness_eps=topness_eps,
+        camera_eps=camera_eps,
+    )
+
+    return map_surface_topness_to_semantic_faces(
+        topness=state["topness"],
+        candidate_mask=state["candidate_mask"],
+        surface_to_face_slot=motion.semantic_surface_to_face_slot,
+        missing_value=missing_value,
     )

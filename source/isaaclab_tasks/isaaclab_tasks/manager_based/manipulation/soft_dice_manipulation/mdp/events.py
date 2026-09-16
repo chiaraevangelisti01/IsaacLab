@@ -71,6 +71,7 @@ def reset_to_motion_start(
     cube_position_offset: torch.Tensor | None = None,
     cube_orientation_offset: torch.Tensor | None = None,
     sample_motion: bool = True,
+    randomize_semantic_face_mapping: bool = False,
 ):
     """Reset root, joints, and the deformable dice to the demonstrated start state."""
 
@@ -79,8 +80,14 @@ def reset_to_motion_start(
         return
 
     motion: MotionCommand = env.command_manager.get_term(command_name)
+
     if sample_motion:
         motion.sample_motions(env_ids)
+    if randomize_semantic_face_mapping:
+        motion.sample_semantic_face_mappings(
+            env_ids
+        )
+
     robot = env.scene[robot_name]
     cube = env.scene[cube_name]
 

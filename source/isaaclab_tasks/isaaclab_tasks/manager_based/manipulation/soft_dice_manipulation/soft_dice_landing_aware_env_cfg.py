@@ -48,6 +48,16 @@ class LandingAwarePolicyCfg(
         },
     )
 
+    # object_topness = ObsTerm(
+    #     func=mdp.object_semantic_topness,
+    #     params={
+    #         "command_name": "motion",
+    #         "topness_eps": 0.1,
+    #         "camera_eps": 1.0e-3,
+    #         "missing_value": -1.0,
+    #     },
+    # )
+
 @configclass
 class LandingAwareCriticCfg(
     ObservationsCfg.PrivilegedCfg
@@ -135,7 +145,7 @@ class LandingAwareRewardsCfg(
 
     landing_position = RewTerm(
         func=mdp.landing_position_region_reward_exp,
-        weight=4.0,
+        weight=1.0,
         params={
             "command_name": "motion",
 
@@ -222,17 +232,17 @@ class LandingAwareRewardsCfg(
 
     #Torque ablaiton
 
-    joint_torque = RewTerm(
-    func=base_mdp.joint_torques_l2,
-    weight=-1.0e-4,
-    params={
-        "asset_cfg": SceneEntityCfg(
-            "robot",
-            joint_names=H1_TRACKING_JOINT_NAMES,
-            preserve_order=True,
-        ),
-    },
-)
+    # joint_torque = RewTerm(
+    # func=base_mdp.joint_torques_l2,
+    # weight=-1.0e-4,
+    # params={
+    #     "asset_cfg": SceneEntityCfg(
+    #         "robot",
+    #         joint_names=H1_TRACKING_JOINT_NAMES,
+    #         preserve_order=True,
+    #     ),
+    # },
+    # )
 
 
 # ======================================================================
@@ -265,3 +275,4 @@ class SoftDiceLandingAwareEnvCfg(
             / "reference_trajectories"
             / "trajectory_phase_metadata.json"
         )
+        self.events.reset_to_reference.params["randomize_semantic_face_mapping"] = True

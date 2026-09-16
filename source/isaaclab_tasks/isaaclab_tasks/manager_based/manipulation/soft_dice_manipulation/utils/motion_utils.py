@@ -58,6 +58,14 @@ H1_HAND_OFFSETS_B = [
     [0.28, -0.0005, -0.0185],
 ]
 
+# D435 RGB module position expressed in torso_link coordinates.
+# Source: robot URDF, d435_rgb_module_joint.
+H1_D435_RGB_POSITION_TORSO = [
+    0.10848474394,
+    0.0325,
+    0.69317107367,
+]
+
 _REPO_ROOT = Path(ISAACLAB_TASKS_EXT_DIR).resolve().parents[1]
 _MODELS_PATH = _REPO_ROOT / "scripts" / "soft_dice_environment" / "models"
 CUSTOM_DICE_DEFORMABLE_USD = str(_MODELS_PATH / "dice_superquadric_further_reduced7.usd")
